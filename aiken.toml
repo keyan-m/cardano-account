@@ -1,0 +1,14 @@
+name = "keyan-m/cardano-walletless-onboarding"
+version = "0.0.0"
+license = "Apache-2.0"
+description = "An alternative Cardano solution with usernames and passwords instead of wallets"
+
+[repository]
+user = "keyan-m"
+project = "cardano-walletless-onboarding"
+platform = "github"
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "1.8.0"
+source = "github"
