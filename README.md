@@ -1,55 +1,11 @@
-# cardano-walletless-onboarding
+# Cardano Account: A Wallet-less Solution
 
-Write validators in the `validators` folder, and supporting functions in the `lib` folder using `.ak` as a file extension.
+An alternative solution to Cardano wallets to simplify the adoption by allowing
+users to take custody of their digital assets with a username and
+password—similar to web2 conventions.
 
-For example, as `validators/always_true.ak`
+## How does it work?
 
-```gleam
-validator {
-  fn spend(_datum: Data, _redeemer: Data, _context: Data) -> Bool {
-    True
-  }
-}
-```
-
-## Building
-
-```sh
-aiken build
-```
-
-## Testing
-
-You can write tests in any module using the `test` keyword. For example:
-
-```gleam
-test foo() {
-  1 + 1 == 2
-}
-```
-
-To run all tests, simply do:
-
-```sh
-aiken check
-```
-
-To run only tests matching the string `foo`, do:
-
-```sh
-aiken check -m foo
-```
-
-## Documentation
-
-If you're writing a library, you might want to generate an HTML documentation for it.
-
-Use:
-
-```sh
-aiken docs
-```
-
-## Resources
-
-Find more on the [Aiken's user manual](https://aiken-lang.org).
+By allocating a UTxO for each username, and storing the hash of a salted
+password plus its nonce, a secure access to the funds (without leaking data)
+can be provided.
