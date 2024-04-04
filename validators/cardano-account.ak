@@ -6,7 +6,7 @@ use aiken/transaction.{
 }
 use aiken/transaction/credential.{Address, ScriptCredential}
 use aiken/transaction/value
-use cardano_walletless_onboarding/utils as utils
+use cardano_account/utils as utils
 
 type Datum {
   RecordHead { next_username: Option<ByteArray> }
