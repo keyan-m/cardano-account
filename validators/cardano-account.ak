@@ -19,12 +19,8 @@ type Datum {
 }
 
 type MintAction {
-  Initiate
-  NewAccount {
-    username: ByteArray,
-    password_hash: ByteArray,
-    initial_balance: Int,
-  }
+  InitiateRecord
+  MintNewAccount { username: ByteArray, password_hash: ByteArray }
 }
 
 validator(
@@ -51,7 +47,7 @@ validator(
     let own_script_cred = ScriptCredential(own_policy)
 
     when action is {
-      Initiate -> {
+      InitiateRecord -> {
         // To enforce a single initiation, the specified UTxO must be spent.
         expect
           list.any(inputs, fn(input) { input.output_reference == utxo_ref })?
@@ -81,7 +77,7 @@ validator(
         // List head's asset must match the minted asset.
         (list_head_asset == mint_triplet)?
       }
-      NewAccount { username, password_hash, initial_balance } -> {
+      MintNewAccount { username, password_hash } -> {
         expect [
           Input {
             output: Output {
@@ -148,6 +144,11 @@ validator(
             nonce: cbor.serialise(own_out_ref),
             next_username,
           }
+        let (
+          accounts_asset_policy,
+          accounts_asset_name,
+          accounts_asset_quantity,
+        ) = utils.get_single_asset_from_value(o1_value)
         and {
           o0_pay_cred == own_script_cred,
           o1_pay_cred == own_script_cred,
@@ -156,7 +157,9 @@ validator(
           o0_datum == InlineDatum(updated_datum),
           o1_datum == InlineDatum(account_datum),
           o0_value == curr_value,
-          o1_value == value.from_lovelace(initial_balance),
+          accounts_asset_policy == own_policy,
+          accounts_asset_name == username,
+          accounts_asset_quantity == 1,
         }?
       }
     }
