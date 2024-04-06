@@ -1,17 +1,18 @@
-use aiken/bytearray
+use aiken/bytearray 
+use aiken/cbor 
 use aiken/list
 use aiken/transaction.{
   InlineDatum, Input, Mint, Output, OutputReference, Redeemer, ScriptContext,
   Transaction,
 }
-use aiken/transaction/credential.{Address, ScriptCredential}
+use aiken/transaction/credential.{Address, ScriptCredential, StakeCredential}
 use aiken/transaction/value
 use cardano_account/utils as utils
 
 type Datum {
   RecordHead { next_username: Option<ByteArray> }
   Account {
-    hashed_salted_password_hash: ByteArray,
+    password_hash: ByteArray,
     nonce: ByteArray,
     next_username: Option<ByteArray>,
   }
@@ -19,10 +20,14 @@ type Datum {
 
 type MintAction {
   Initiate
-  NewAccount { username: ByteArray, password_hash: ByteArray, input_index: Int }
+  NewAccount {
+    username: ByteArray,
+    password_hash: ByteArray,
+    initial_balance: Int,
+  }
 }
 
-validator(utxo_ref: OutputReference) {
+validator(utxo_ref: OutputReference, providers_stake_cred: Option<StakeCredential>) {
   fn mint(action: MintAction, ctx: ScriptContext) {
     let ScriptContext { transaction: tx, purpose } = ctx
 
@@ -39,6 +44,8 @@ validator(utxo_ref: OutputReference) {
 
     expect (mint_policy == own_policy)?
     expect (mint_quantity == 1)?
+
+    let own_script_cred = ScriptCredential(own_policy)
 
     when action is {
       Initiate -> {
@@ -59,9 +66,7 @@ validator(utxo_ref: OutputReference) {
         ] =
           list.filter(
             outputs,
-            fn(output) {
-              output.address.payment_credential == ScriptCredential(own_policy)
-            },
+            fn(output) { output.address.payment_credential == own_script_cred },
           )
 
         // Linked list must be empty at initiation.
@@ -73,16 +78,30 @@ validator(utxo_ref: OutputReference) {
         // List head's asset must match the minted asset.
         (list_head_asset == mint_triplet)?
       }
-      NewAccount { username, password_hash, input_index } -> {
-        // Specified UTxO must be getting spent from the spending endpoint.
-        expect Some(Input {
-          output: Output {
-            datum: InlineDatum(head_or_prev_user_datum),
-            value: curr_value,
-            ..
+      NewAccount { username, password_hash, initial_balance } -> {
+        expect [
+          Input {
+            output: Output {
+              datum: InlineDatum(head_or_prev_user_datum),
+              value: curr_value,
+              ..
+            },
+            output_reference: own_out_ref,
           },
-          ..
-        }) = list.at(inputs, input_index)
+        ] =
+          list.filter(
+            inputs,
+            fn(i) {
+              let Input {
+                output: Output {
+                  address: Address { payment_credential, .. },
+                  ..
+                },
+                ..
+              } = i
+              payment_credential == own_script_cred
+            },
+          )
         expect d: Datum = head_or_prev_user_datum
         let curr_asset = utils.get_single_asset_from_value(curr_value)
         let (curr_asset_policy, curr_asset_tn, _) = curr_asset
@@ -91,35 +110,51 @@ validator(utxo_ref: OutputReference) {
             username == mint_name,
             bytearray.compare(curr_asset_tn, username) == Less,
           }?
-        when d is {
-          RecordHead { next_username } -> {
-            expect validate_proper_placement(username, next_username)?
-            expect [
-              Output {
-                address: Address {
-                  payment_credential: o0PKH,
-                  stake_credential: o0StakeCred,
-                },
-                value: o0Value,
-                datum: o0Datum,
-                reference_script: None,
-              },
-              Output {
-                address: Address {
-                  payment_credential: o1PKH,
-                  stake_credential: o1StakeCred,
-                },
-                value: o1Value,
-                datum: o1Datum,
-                reference_script: None,
-              },
-              ..
-            ] = outputs
-            True
+        let (next_username, updated_datum) =
+          when d is {
+            RecordHead { next_username } ->
+              (next_username, RecordHead(Some(username)))
+            Account { password_hash, nonce, next_username } ->
+              (next_username, Account(password_hash, nonce, Some(username)))
           }
-          Account { hashed_salted_password_hash, nonce, next_username } ->
-            validate_proper_placement(username, next_username)
-        }
+        expect validate_proper_placement(username, next_username)?
+        expect [
+          Output {
+            address: Address {
+              payment_credential: o0_pay_cred,
+              stake_credential: o0_stake_cred,
+            },
+            value: o0_value,
+            datum: o0_datum,
+            reference_script: None,
+          },
+          Output {
+            address: Address {
+              payment_credential: o1_pay_cred,
+              stake_credential: o1_stake_cred,
+            },
+            value: o1_value,
+            datum: o1_datum,
+            reference_script: None,
+          },
+          ..
+        ] = outputs
+        let account_datum: Datum =
+          Account {
+            password_hash,
+            nonce: cbor.serialise(own_out_ref),
+            next_username,
+          }
+        and {
+          o0_pay_cred == own_script_cred,
+          o1_pay_cred == own_script_cred,
+          o0_stake_cred == providers_stake_cred,
+          o1_stake_cred == providers_stake_cred,
+          o0_datum == InlineDatum(updated_datum),
+          o1_datum == InlineDatum(account_datum),
+          o0_value == curr_value,
+          o1_value == value.from_lovelace(initial_balance),
+        }?
       }
     }
   }
