@@ -1,5 +1,5 @@
-use aiken/bytearray 
-use aiken/cbor 
+use aiken/bytearray
+use aiken/cbor
 use aiken/list
 use aiken/transaction.{
   InlineDatum, Input, Mint, Output, OutputReference, Redeemer, ScriptContext,
@@ -27,7 +27,10 @@ type MintAction {
   }
 }
 
-validator(utxo_ref: OutputReference, providers_stake_cred: Option<StakeCredential>) {
+validator(
+  utxo_ref: OutputReference,
+  providers_stake_cred: Option<StakeCredential>,
+) {
   fn mint(action: MintAction, ctx: ScriptContext) {
     let ScriptContext { transaction: tx, purpose } = ctx
 
