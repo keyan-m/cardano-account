@@ -36,6 +36,7 @@ type SpendAction {
     presalt_password: ByteArray,
     new_password_hash: ByteArray,
   }
+  DepleteAccount { input_index: Int }
 }
 
 // THE VALIDATOR
@@ -208,17 +209,13 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
     when action is {
       // Only ensures that the minting endpoint is invoked.
       AppendToNewAccount { input_index } -> {
-        expect Some(Input {
-          output: Output {
-            address: Address {
-              payment_credential: ScriptCredential(own_script),
-              ..
-            },
+        let Output {
+          address: Address {
+            payment_credential: ScriptCredential(own_script),
             ..
           },
-          output_reference,
-        }) = list.at(inputs, input_index)
-        expect (output_reference == own_out_ref)?
+          ..
+        } = get_own_input_at(inputs, own_out_ref, input_index)
 
         expect [(mint_policy, _, mint_quantity)] =
           mint
@@ -242,15 +239,12 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
             },
           )
 
-        expect Some(Input {
-          output: Output {
-            address: in_address,
-            value: in_value,
-            datum: in_datum,
-            ..
-          },
-          output_reference: in_out_ref,
-        }) = list.at(inputs, input_index)
+        let Output {
+          address: in_address,
+          value: in_value,
+          datum: in_datum,
+          ..
+        } = get_own_input_at(inputs, own_out_ref, input_index)
 
         // First output must be the reproduced UTxO.
         expect [
@@ -272,26 +266,22 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
         }?
       }
       Withdraw { input_index, presalt_password, new_password_hash } -> {
-        expect Some(Input {
-          output: Output {
-            address: Address {
-              payment_credential: ScriptCredential(own_script),
-              ..
-            },
-            datum: InlineDatum(own_datum),
-            value: own_value,
+        let Output {
+          address: Address {
+            payment_credential: ScriptCredential(own_script),
             ..
-          },
-          output_reference: spent_own_out_ref,
-        }) = list.at(inputs, input_index)
-        expect (own_out_ref == spent_own_out_ref)?
+          } as in_address,
+          datum: InlineDatum(in_datum),
+          value: in_value,
+          ..
+        } = get_own_input_at(inputs, own_out_ref, input_index)
 
         // Validate the password.
         expect Account { password_hash, nonce, next_username }: Datum =
-          own_datum
+          in_datum
         expect password_is_valid(password_hash, nonce, presalt_password)?
 
-        // Protection layer to prevent resubmitting an old password.
+        // Protection layer to prevent resubmitting the same password.
         expect !(password_hash == new_password_hash)?
 
         let new_datum: Datum =
@@ -303,39 +293,59 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
 
         expect [
           Output {
-            address: Address {
-              payment_credential: o_pay_cred,
-              stake_credential: Some(o_stake_cred),
-            },
-            value: o_value,
-            datum: o_datum,
+            address: out_address,
+            value: out_value,
+            datum: out_datum,
             reference_script: None,
           },
           ..
         ] = outputs
 
-        // No need to check the quantities.
+        // Only requirement is that username's NFT is not leaving the UTxO. No
+        // need to check the quantities here.
         expect [(in_username, _)] =
-          own_value
+          in_value
             |> value.tokens(own_script)
             |> dict.to_list
         expect [(out_username, _)] =
-          o_value
+          out_value
             |> value.tokens(own_script)
             |> dict.to_list
 
         and {
-          o_pay_cred == ScriptCredential(own_script),
-          o_stake_cred == providers_stake_cred,
-          o_datum == InlineDatum(new_datum),
+          in_address == out_address,
+          out_datum == InlineDatum(new_datum),
           in_username == out_username,
         }
+      }
+      DepleteAccount { input_index } -> {
+        let Output {
+          address: Address {
+            payment_credential: ScriptCredential(own_script),
+            ..
+          } as in_address,
+          datum: InlineDatum(in_datum),
+          value: in_value,
+          ..
+        } = get_own_input_at(inputs, own_out_ref, input_index)
       }
     }
   }
 }
 
 // HELPER FUNCTIONS
+fn get_own_input_at(
+  inputs: List<Input>,
+  own_out_ref: OutputReference,
+  input_index: Int
+) -> Output {
+  expect Some(Input {
+    output: own_utxo,
+    output_reference: spent_own_out_ref,
+  } as own_input) = list.at(inputs, input_index)
+  expect (own_out_ref == spent_own_out_ref)?
+  own_utxo
+}
 fn password_is_valid(
   password_hash: ByteArray,
   nonce: ByteArray,
