@@ -1,14 +1,17 @@
+// IMPORTS
 use aiken/bytearray
 use aiken/cbor
+use aiken/hash
 use aiken/list
 use aiken/transaction.{
-  InlineDatum, Input, Mint, Output, OutputReference, Redeemer, ScriptContext,
+  InlineDatum, Input, Mint, Output, OutputReference, ScriptContext, Spend,
   Transaction,
 }
 use aiken/transaction/credential.{Address, ScriptCredential, StakeCredential}
 use aiken/transaction/value
 use cardano_account/utils as utils
 
+// DATATYPES
 type Datum {
   RecordHead { next_username: Option<ByteArray> }
   Account {
@@ -21,16 +24,23 @@ type Datum {
 type MintAction {
   InitiateRecord
   MintNewAccount { username: ByteArray, password_hash: ByteArray }
+  CloseAccount { prev_elements_input_index: Int, accounts_input_index: Int }
 }
 
-validator(
-  utxo_ref: OutputReference,
-  providers_stake_cred: Option<StakeCredential>,
-) {
-  fn mint(action: MintAction, ctx: ScriptContext) {
-    let ScriptContext { transaction: tx, purpose } = ctx
+type SpendAction {
+  AppendToNewAccount { input_index: Int }
+  Deposit { input_index: Int }
+  Withdraw {
+    input_index: Int,
+    presalt_password: ByteArray,
+    new_password_hash: ByteArray,
+  }
+}
 
-    expect Mint(own_policy) = purpose
+// THE VALIDATOR
+validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
+  fn mint(action: MintAction, ctx: ScriptContext) {
+    expect ScriptContext { transaction: tx, purpose: Mint(own_policy) } = ctx
 
     let Transaction { inputs, outputs, mint, .. } = tx
 
@@ -55,18 +65,22 @@ validator(
         // Only a single, nameless token must be minted.
         expect (mint_name == #"")?
 
-        // Only one UTxO must be produced at the script address.
+        // First produced UTxO must go to the script, and providers stake
+        // credential.
         expect [
           Output {
             datum: InlineDatum(list_head_datum),
             value: list_head_value,
-            ..
+            address: Address {
+              payment_credential: script_cred,
+              stake_credential: Some(dest_stake_cred),
+            },
+            reference_script: None,
           },
-        ] =
-          list.filter(
-            outputs,
-            fn(output) { output.address.payment_credential == own_script_cred },
-          )
+          ..
+        ] = outputs
+        expect (script_cred == own_script_cred)?
+        expect (dest_stake_cred == providers_stake_cred)?
 
         // Linked list must be empty at initiation.
         expect RecordHead { next_username: None }: Datum = list_head_datum
@@ -121,7 +135,7 @@ validator(
           Output {
             address: Address {
               payment_credential: o0_pay_cred,
-              stake_credential: o0_stake_cred,
+              stake_credential: Some(o0_stake_cred),
             },
             value: o0_value,
             datum: o0_datum,
@@ -130,7 +144,7 @@ validator(
           Output {
             address: Address {
               payment_credential: o1_pay_cred,
-              stake_credential: o1_stake_cred,
+              stake_credential: Some(o1_stake_cred),
             },
             value: o1_value,
             datum: o1_datum,
@@ -162,14 +176,88 @@ validator(
           accounts_asset_quantity == 1,
         }?
       }
+      CloseAccount { prev_elements_input_index, accounts_input_index } -> todo
     }
   }
 
-  fn spend(_datum: Datum, _redeemer: Redeemer, _ctx: ScriptContext) {
-    True
+  fn spend(datum: Datum, action: SpendAction, ctx: ScriptContext) {
+    expect ScriptContext { transaction: tx, purpose: Spend(own_out_ref) } = ctx
+
+    let Transaction { inputs, outputs, mint, .. } = tx
+
+    when action is {
+      // Only ensures that the minting endpoint is invoked.
+      AppendToNewAccount { input_index } -> {
+        expect Some(Input {
+          output: Output {
+            address: Address {
+              payment_credential: ScriptCredential(own_script),
+              ..
+            },
+            ..
+          },
+          output_reference,
+        }) = list.at(inputs, input_index)
+        expect (output_reference == own_out_ref)?
+
+        expect [(mint_policy, _, mint_quantity)] =
+          mint
+            |> value.from_minted_value
+            |> value.flatten
+
+        and {
+          mint_policy == own_script,
+          mint_quantity == 1,
+        }
+      }
+      Deposit { input_index } -> todo
+      Withdraw { input_index, presalt_password, new_password_hash } -> {
+        expect Some(Input {
+          output: Output {
+            address: Address {
+              payment_credential: ScriptCredential(own_script),
+              ..
+            },
+            datum: InlineDatum(own_datum),
+            value: own_value,
+            ..
+          },
+          output_reference: spent_own_out_ref,
+        }) = list.at(inputs, input_index)
+        expect (own_out_ref == spent_own_out_ref)?
+        expect Account { password_hash, nonce, next_username }: Datum =
+          own_datum
+        expect password_is_valid(password_hash, nonce, presalt_password)?
+        let new_datum: Datum =
+          Account {
+            password_hash: new_password_hash,
+            nonce: cbor.serialise(own_out_ref),
+            next_username,
+          }
+        expect [
+          Output {
+            address: Address {
+              payment_credential: o_pay_cred,
+              stake_credential: Some(o_stake_cred),
+            },
+            value: o_value,
+            datum: o_datum,
+            reference_script: None,
+          },
+          ..
+        ] = outputs
+        and {
+          o_pay_cred == ScriptCredential(own_script),
+          o_stake_cred == providers_stake_cred,
+          o_datum == InlineDatum(new_datum),
+          value.without_lovelace(o_value) == value.without_lovelace(own_value),
+        }
+      }
+    }
   }
 }
 
+// HELPER FUNCTIONS
 fn validate_proper_placement(
   new_elem: ByteArray,
   m_next_elem: Option<ByteArray>,
@@ -178,4 +266,15 @@ fn validate_proper_placement(
     None -> True
     Some(next_elem) -> bytearray.compare(new_elem, next_elem) == Less
   }
+}
+
+fn password_is_valid(
+  password_hash: ByteArray,
+  nonce: ByteArray,
+  presalt_password: ByteArray,
+) -> Bool {
+  let hashed_salted_pass =
+    bytearray.concat(nonce, presalt_password)
+      |> hash.blake2b_256
+  hashed_salted_pass == password_hash
 }
