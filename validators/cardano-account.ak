@@ -8,7 +8,7 @@ use aiken/transaction.{
   Transaction,
 }
 use aiken/transaction/credential.{Address, ScriptCredential, StakeCredential}
-use aiken/transaction/value
+use aiken/transaction/value.{Value}
 use cardano_account/utils as utils
 
 // DATATYPES
@@ -29,7 +29,7 @@ type MintAction {
 
 type SpendAction {
   AppendToNewAccount { input_index: Int }
-  Deposit { input_index: Int }
+  Deposit { input_index: Int, deposit_value: Value }
   Withdraw {
     input_index: Int,
     presalt_password: ByteArray,
@@ -52,7 +52,6 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
     let (mint_policy, mint_name, mint_quantity) = mint_triplet
 
     expect (mint_policy == own_policy)?
-    expect (mint_quantity == 1)?
 
     let own_script_cred = ScriptCredential(own_policy)
 
@@ -64,6 +63,7 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
 
         // Only a single, nameless token must be minted.
         expect (mint_name == #"")?
+        expect (mint_quantity == 1)?
 
         // First produced UTxO must go to the script, and providers stake
         // credential.
@@ -72,26 +72,32 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
             datum: InlineDatum(list_head_datum),
             value: list_head_value,
             address: Address {
-              payment_credential: script_cred,
+              payment_credential: dest_script_cred,
               stake_credential: Some(dest_stake_cred),
             },
             reference_script: None,
           },
           ..
         ] = outputs
-        expect (script_cred == own_script_cred)?
+        expect (dest_script_cred == own_script_cred)?
         expect (dest_stake_cred == providers_stake_cred)?
 
         // Linked list must be empty at initiation.
         expect RecordHead { next_username: None }: Datum = list_head_datum
 
-        // List head UTxO must contain only one other asset apart from Lovelaces.
+        // List head UTxO must contain only one other asset apart from
+        // Lovelaces.
         let list_head_asset = utils.get_single_asset_from_value(list_head_value)
 
         // List head's asset must match the minted asset.
         (list_head_asset == mint_triplet)?
       }
       MintNewAccount { username, password_hash } -> {
+        // A signle asset must be minted for `username`.
+        expect (username == mint_name)?
+        expect (mint_quantity == 1)?
+
+        // Only 1 UTxO must be getting spent from the script address.
         expect [
           Input {
             output: Output {
@@ -115,14 +121,16 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
               payment_credential == own_script_cred
             },
           )
-        expect d: Datum = head_or_prev_user_datum
+
+        // Only Ada and previous user's NFT must be carried in the UTxO.
         let curr_asset = utils.get_single_asset_from_value(curr_value)
         let (curr_asset_policy, curr_asset_tn, _) = curr_asset
         expect and {
             curr_asset_policy == own_policy,
-            username == mint_name,
             bytearray.compare(curr_asset_tn, username) == Less,
           }?
+
+        expect d: Datum = head_or_prev_user_datum
         let (next_username, updated_datum) =
           when d is {
             RecordHead { next_username } ->
@@ -130,7 +138,16 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
             Account { password_hash, nonce, next_username } ->
               (next_username, Account(password_hash, nonce, Some(username)))
           }
-        expect validate_proper_placement(username, next_username)?
+
+        // New username must be smaller than a potential next user.
+        expect
+          when next_username is {
+            None -> True
+            Some(prev_next_user) ->
+              bytearray.compare(username, prev_next_user) == Less
+          }?
+
+        // First 2 outputs are expected to be produced at the script address.
         expect [
           Output {
             address: Address {
@@ -152,6 +169,7 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
           },
           ..
         ] = outputs
+
         let account_datum: Datum =
           Account {
             password_hash,
@@ -163,6 +181,7 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
           accounts_asset_name,
           accounts_asset_quantity,
         ) = utils.get_single_asset_from_value(o1_value)
+
         and {
           o0_pay_cred == own_script_cred,
           o1_pay_cred == own_script_cred,
@@ -210,7 +229,47 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
           mint_quantity == 1,
         }
       }
-      Deposit { input_index } -> todo
+      Deposit { input_index, deposit_value } -> {
+        // Always `True` to avoid operating on the accumulator.
+        let positive_deposits =
+          value.reduce(
+            deposit_value,
+            True,
+            fn(_, _, q: Int, _) -> Bool {
+              expect (q > 0)?
+              True
+            },
+          )
+
+        expect Some(Input {
+          output: Output {
+            address: in_address,
+            value: in_value,
+            datum: in_datum,
+            ..
+          },
+          output_reference,
+        }) = list.at(inputs, input_index)
+
+        // First output must be the reproduced UTxO.
+        expect [
+          Output {
+            address: out_address,
+            value: out_value,
+            datum: out_datum,
+            reference_script: None,
+          },
+          ..
+        ] = outputs
+
+        and {
+          positive_deposits,
+          output_reference == own_out_ref,
+          in_address == out_address,
+          in_datum == out_datum,
+          value.merge(in_value, deposit_value) == out_value,
+        }?
+      }
       Withdraw { input_index, presalt_password, new_password_hash } -> {
         expect Some(Input {
           output: Output {
@@ -258,16 +317,6 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
 }
 
 // HELPER FUNCTIONS
-fn validate_proper_placement(
-  new_elem: ByteArray,
-  m_next_elem: Option<ByteArray>,
-) -> Bool {
-  when m_next_elem is {
-    None -> True
-    Some(next_elem) -> bytearray.compare(new_elem, next_elem) == Less
-  }
-}
-
 fn password_is_valid(
   password_hash: ByteArray,
   nonce: ByteArray,
