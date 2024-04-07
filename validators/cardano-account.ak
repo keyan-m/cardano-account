@@ -1,6 +1,7 @@
 // IMPORTS
 use aiken/bytearray
 use aiken/cbor
+use aiken/dict
 use aiken/hash
 use aiken/list
 use aiken/transaction.{
@@ -248,7 +249,7 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
             datum: in_datum,
             ..
           },
-          output_reference,
+          output_reference: in_out_ref,
         }) = list.at(inputs, input_index)
 
         // First output must be the reproduced UTxO.
@@ -264,7 +265,7 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
 
         and {
           positive_deposits,
-          output_reference == own_out_ref,
+          in_out_ref == own_out_ref,
           in_address == out_address,
           in_datum == out_datum,
           value.merge(in_value, deposit_value) == out_value,
@@ -284,15 +285,22 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
           output_reference: spent_own_out_ref,
         }) = list.at(inputs, input_index)
         expect (own_out_ref == spent_own_out_ref)?
+
+        // Validate the password.
         expect Account { password_hash, nonce, next_username }: Datum =
           own_datum
         expect password_is_valid(password_hash, nonce, presalt_password)?
+
+        // Protection layer to prevent resubmitting an old password.
+        expect !(password_hash == new_password_hash)?
+
         let new_datum: Datum =
           Account {
             password_hash: new_password_hash,
             nonce: cbor.serialise(own_out_ref),
             next_username,
           }
+
         expect [
           Output {
             address: Address {
@@ -305,11 +313,22 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
           },
           ..
         ] = outputs
+
+        // No need to check the quantities.
+        expect [(in_username, _)] =
+          own_value
+            |> value.tokens(own_script)
+            |> dict.to_list
+        expect [(out_username, _)] =
+          o_value
+            |> value.tokens(own_script)
+            |> dict.to_list
+
         and {
           o_pay_cred == ScriptCredential(own_script),
           o_stake_cred == providers_stake_cred,
           o_datum == InlineDatum(new_datum),
-          value.without_lovelace(o_value) == value.without_lovelace(own_value),
+          in_username == out_username,
         }
       }
     }
