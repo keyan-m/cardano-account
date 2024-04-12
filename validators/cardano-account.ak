@@ -11,7 +11,7 @@ use aiken/transaction.{
 use aiken/transaction/credential.{
   Address, Script, ScriptCredential, StakeCredential,
 }
-use aiken/transaction/value.{MintedValue, Value}
+use aiken/transaction/value.{MintedValue, PolicyId, Value}
 use cardano_account/utils as utils
 
 // DATATYPES
@@ -36,7 +36,10 @@ type MintAction {
 
 type SpendAction {
   AppendToNewAccount { input_index: Int }
-  Deposit { input_index: Int, deposit_value: Value }
+  Deposit {
+    input_index: Int,
+    deposit_value: List<(PolicyId, List<(ByteArray, Int)>)>,
+  }
   Withdraw {
     input_index: Int,
     presalt_password: ByteArray,
@@ -354,11 +357,13 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
         // TODO: Limit the maximum number of tokens an account can hold—perhaps
         //       even limit it to only Ada.
 
+        let deposit_value_value: Value = value.from_asset_list(deposit_value)
+
         // Always `True` to avoid perfoming a boolean operation on the
         // accumulator.
         let positive_deposits =
           value.reduce(
-            deposit_value,
+            deposit_value_value,
             True,
             fn(_, _, q: Int, _) -> Bool {
               expect (q > 0)?
@@ -388,7 +393,7 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
           positive_deposits,
           in_address == out_address,
           in_inline_datum == out_datum,
-          value.merge(in_value, deposit_value) == out_value,
+          value.merge(in_value, deposit_value_value) == out_value,
         }?
       }
       Withdraw { input_index, presalt_password, new_password_hash } -> {
