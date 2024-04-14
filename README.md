@@ -66,7 +66,7 @@ requirement).
 One solution is to dedicate an address for each user, where the differing
 parameter is their usernames. This, along with the dual-NFT minting solution
 mentioned earlier (where the second NFT is sent to user's dedicated address),
-and passing of [CIP-0112](https://github.com/cardano-foundation/CIPs/pull/749) will
+and passing of [CIP-112](https://github.com/cardano-foundation/CIPs/pull/749) will
 allow `cardano-account` users participate in the ecosystem similar to wallet
 owners.
 
@@ -96,6 +96,11 @@ puts the UTxO at the risk of [token dust attack](https://plutonomicon.github.io/
 
 One solution would be limiting the policy IDs an account is willing to accept,
 which expands this limit with consent of the account's owner.
+
+Another limitation would be deposits from outside frontend providers (e.g.
+from CEXes). This is something that requires the separate address solution
+mentioned [earlier](#ecosystem-participation), and also passing of [CIP-69](https://github.com/cardano-foundation/CIPs/pull/321) which
+allows scripts to spend datum-less UTxOs.
 
 ### Withdrawals
 
