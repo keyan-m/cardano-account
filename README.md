@@ -11,6 +11,7 @@
         * [Account Creation](#account-creation)
         * [Deposits](#deposits)
         * [Withdrawals](#withdrawals)
+    * [Disclaimer](#disclaimer)
 
 <!-- vim-markdown-toc -->
 
@@ -108,3 +109,7 @@ which expands this limit with consent of the account's owner.
 4. And builds the transaction such that the redeemer contains first iteration of
    salt-and-hashing of the password
 
+## Disclaimer
+
+In its current form, this is primarily intended as a proof of concept and not
+meant to be used in production.
