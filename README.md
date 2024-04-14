@@ -92,7 +92,7 @@ the required fee and collateral UTxO(s).
 
 Currently, the contract allows anyone to increase the Lovelace count of any
 account UTxOs. Idealy, payments should be possible with any tokens, but this
-puts the UTxO at the risk of [token dust attack](https://plutonomicon/github.io/plutonomicon/vulnerabilities#utxo-value-size-spam-aka-token-dust-attack).
+puts the UTxO at the risk of [token dust attack](https://plutonomicon.github.io/plutonomicon/vulnerabilities#utxo-value-size-spam-aka-token-dust-attack).
 
 One solution would be limiting the policy IDs an account is willing to accept,
 which expands this limit with consent of the account's owner.
