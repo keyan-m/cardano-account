@@ -26,8 +26,8 @@ experienced users.
 
 ### Front Running
 
-Implemented as is, the script is parametrized by a list of "providers" (i.e. a
-frontend provider), so that it can validate one of them has signed the
+Implemented as is, the script is parametrized by a list of "providers" (i.e.
+frontend providers), so that it can validate one of them has signed the
 transaction.
 
 If this requirement was not put in place, a node validator would be free to
