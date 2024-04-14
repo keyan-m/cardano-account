@@ -85,19 +85,3 @@ parameter is their usernames. This, along with the dual-NFT minting solution
 mentioned earlier (where the second NFT is sent to user's dedicated address),
 and passing of [CIP-0112]() will allow `cardano-account` users participate in
 the ecosystem similar to wallet owners.
-
-### Front Running
-
-Implemented as is, a node validator is free to avoid submitting the transaction
-honestly, but rather remove the transaction, use the provided redeemer, and
-withdraw the account in its own favor.
-
-This is a major issue that is likely not solvable without changes to Cardano's
-infrastructure.
-
-However, one way to mitigate the required centralization for combating this
-attack vector, is to parametrise the scripts with a list of public key hashes
-that are willing to participate in signing a given transaction.
-
-This way, assuming multiple frontend providers exist, the required signature
-from them can be spread to avoid a reliance on one platform for interactions.

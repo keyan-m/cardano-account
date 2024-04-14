@@ -9,12 +9,15 @@ use aiken/transaction.{
   Transaction,
 }
 use aiken/transaction/credential.{
-  Address, Script, ScriptCredential, StakeCredential,
+  Address, Script, ScriptCredential, StakeCredential, VerificationKey,
 }
 use aiken/transaction/value.{MintedValue, PolicyId, Value}
 use cardano_account/utils as utils
 
 // DATATYPES
+type VerificationKeyHash =
+  Hash<Blake2b_224, VerificationKey>
+
 type Datum {
   RecordHead { next_username: Option<ByteArray> }
   Account {
@@ -28,6 +31,8 @@ type MintAction {
   InitiateRecord
   MintNewAccount { username: ByteArray, password_hash: ByteArray }
   CloseAccount {
+    providers_index: Int,
+    providers_signature_index: Int,
     prev_elements_out_ref: OutputReference,
     accounts_out_ref: OutputReference,
     presalt_password: ByteArray,
@@ -42,6 +47,8 @@ type SpendAction {
   }
   Withdraw {
     input_index: Int,
+    providers_index: Int,
+    providers_signature_index: Int,
     presalt_password: ByteArray,
     new_password_hash: ByteArray,
   }
@@ -49,7 +56,11 @@ type SpendAction {
 }
 
 // THE VALIDATOR
-validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
+validator(
+  utxo_ref: OutputReference,
+  providers: List<VerificationKeyHash>,
+  providers_stake_cred: StakeCredential,
+) {
   fn mint(action: MintAction, ctx: ScriptContext) {
     expect ScriptContext { transaction: tx, purpose: Mint(own_policy) } = ctx
 
@@ -223,7 +234,13 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
           accounts_asset_quantity == 1,
         }?
       }
-      CloseAccount { prev_elements_out_ref, accounts_out_ref, presalt_password } -> {
+      CloseAccount {
+        providers_index,
+        providers_signature_index,
+        prev_elements_out_ref,
+        accounts_out_ref,
+        presalt_password,
+      } -> {
         // This is essentially a combination of the account creation and the
         // withdrawal endpoints.
         // 1. Two UTxOs are expected to be spent such that one of them points to
@@ -231,6 +248,15 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
         // 2. The closing account's NFT must be getting burnt
         // 3. Datum of the previous account must be updated so that it points to
         //    the (potential) account that the closing account points to
+
+        // Making sure specified provider has signed to prevent front running.
+        expect
+          provider_has_signed(
+            providers_index,
+            providers_signature_index,
+            providers,
+            tx.extra_signatories,
+          )?
 
         expect [
           Input { output: o0, output_reference: o0_out_ref },
@@ -396,7 +422,13 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
           value.merge(in_value, deposit_value_value) == out_value,
         }?
       }
-      Withdraw { input_index, presalt_password, new_password_hash } -> {
+      Withdraw {
+        input_index,
+        providers_index,
+        providers_signature_index,
+        presalt_password,
+        new_password_hash,
+      } -> {
         // Allows withdraw iff:
         // 1. Concatenation of the nonce with the provided password hashes to
         //    the stored hash
@@ -404,6 +436,15 @@ validator(utxo_ref: OutputReference, providers_stake_cred: StakeCredential) {
         //    address, with provider's staking credential)
         // 3. As a slight security measure, prevents the new password to be
         //    identical with the old one
+
+        // Making sure specified provider has signed to prevent front running.
+        expect
+          provider_has_signed(
+            providers_index,
+            providers_signature_index,
+            providers,
+            tx.extra_signatories,
+          )?
 
         expect Output {
           address: Address {
@@ -506,4 +547,16 @@ fn password_is_valid(
     bytearray.concat(nonce, presalt_password)
       |> hash.blake2b_256
   hashed_salted_pass == password_hash
+}
+
+fn provider_has_signed(
+  providers_index: Int,
+  providers_signature_index: Int,
+  providers: List<VerificationKeyHash>,
+  extra_signatories: List<VerificationKeyHash>,
+) -> Bool {
+  expect Some(provider) = list.at(providers, providers_index)
+  expect Some(providers_signature) =
+    list.at(extra_signatories, providers_signature_index)
+  provider == providers_signature
 }
