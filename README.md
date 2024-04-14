@@ -17,7 +17,7 @@
 
 # Cardano Account: A Wallet-less Solution
 
-An alterne solution to Cardano wallets to simplify the adoption by allowing
+An alternate solution to Cardano wallets to simplify the adoption by allowing
 users to take custody of their Ada with a username and password—similar to web2
 conventions.
 
