@@ -21,6 +21,47 @@ match the stored hash in the datum.
 This allows utilizing all the password management solutions already existing,
 and therefore offers an easier onboarding solution for less experienced users.
 
+## Compromises and Issues
+
+### Front Running
+
+Implemented as is, the script is parametrized by a list of "providers" (i.e. a
+frontend provider), so that it can validate one of them has signed the
+transaction.
+
+If this requirement was not put in place, a node validator would be free to
+avoid submitting the transaction honestly, but rather remove the transaction,
+use the provided redeemer, and withdraw the account in its own favor.
+
+This is an issue that is likely not solvable without changes to Cardano's
+infrastructure.
+
+While this is not an ideal solution, it mitigates the required centralization by
+allowing users to use any of the providers.
+
+### Interrupted User Experience
+
+Current design where account UTxOs are also links in the on-chain association
+list leads to an interrupted user experience when another user creates a new
+accounts or closes their existing account, since it might be the account ahead
+of the interrupted user (who might be in the middle of signing a transaction).
+
+A straightforward solution is to create 2 UTxOs for every account such that one
+corresponds to user's place in the association list, while the other is free
+from disturbances, dedicate for user deposits/withdrawals.
+
+### Ecosystem Participation
+
+In this approach where all users share the same address, it becomes impossible
+for them to use most Cardano DApps (since user signature is a common
+requirement).
+
+One solution is to dedicate an address for each user, where the differing
+parameter is their usernames. This, along with the dual-NFT minting solution
+mentioned earlier (where the second NFT is sent to user's dedicated address),
+and passing of [CIP-0112]() will allow `cardano-account` users participate in
+the ecosystem similar to wallet owners.
+
 ## A More Detailed Walkthrough
 
 ### Account Creation
@@ -47,8 +88,8 @@ where the attacker can fill a UTxO with random tokens in order to make the UTxO
 so big such that it can not fit in any future transactions, consequently locking
 all its funds.
 
-Please read the [Future](#future) section to learn how a more proper logic can
-be implemented.
+Please read the [Compromises and Issues](#compromises-and-issues) section to
+learn how a more proper logic can be implemented.
 
 ### Withdrawals
 
@@ -62,26 +103,3 @@ be implemented.
    salt-and-hashing of the password
 
 ## Future
-
-### Interrupted User Experience
-
-Current design where account UTxOs are also links in the on-chain association
-list leads to an interrupted user experience when another user creates a new
-accounts or closes their existing account, since it might be the account ahead
-of the interrupted user (who might be in the middle of signing a transaction).
-
-A straightforward solution is to create 2 UTxOs for every account such that one
-corresponds to user's place in the association list, while the other is free
-from disturbances, dedicate for user deposits/withdrawals.
-
-### Ecosystem Participation
-
-In this approach where all users share the same address, it becomes impossible
-for them to use most Cardano DApps (since user signature is a common
-requirement).
-
-One solution is to dedicate an address for each user, where the differing
-parameter is their usernames. This, along with the dual-NFT minting solution
-mentioned earlier (where the second NFT is sent to user's dedicated address),
-and passing of [CIP-0112]() will allow `cardano-account` users participate in
-the ecosystem similar to wallet owners.
