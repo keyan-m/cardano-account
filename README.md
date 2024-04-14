@@ -17,8 +17,8 @@
 # Cardano Account: A Wallet-less Solution
 
 An alternative solution to Cardano wallets to simplify the adoption by allowing
-users to take custody of their digital assets with a username and
-password—similar to web2 conventions.
+users to take custody of their Ada with a username and password—similar to web2
+conventions.
 
 ## How does it work?
 
@@ -35,7 +35,7 @@ The validator performs the salting and hashing once again to make sure it'll
 match the stored hash in the datum.
 
 With this solution, users can utilize all the password management solutions
-already existing, and therefore offers an easier onboarding solution for less
+already existing, and therefore offers a smoother onboarding process for less
 experienced users.
 
 ## Compromises and Issues
