@@ -1,3 +1,19 @@
+# Table of Contents
+
+<!-- vim-markdown-toc GFM -->
+
+* [Cardano Account: A Wallet-less Solution](#cardano-account-a-wallet-less-solution)
+    * [How does it work?](#how-does-it-work)
+    * [Compromises and Issues](#compromises-and-issues)
+        * [Front Running](#front-running)
+        * [Ecosystem Participation](#ecosystem-participation)
+    * [A More Detailed Walkthrough](#a-more-detailed-walkthrough)
+        * [Account Creation](#account-creation)
+        * [Deposits](#deposits)
+        * [Withdrawals](#withdrawals)
+
+<!-- vim-markdown-toc -->
+
 # Cardano Account: A Wallet-less Solution
 
 An alternative solution to Cardano wallets to simplify the adoption by allowing
