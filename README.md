@@ -40,17 +40,6 @@ infrastructure.
 While this is not an ideal solution, it mitigates the required centralization by
 allowing users to use any of the providers.
 
-### Interrupted User Experience
-
-Current design where account UTxOs are also links in the on-chain association
-list leads to an interrupted user experience when another user creates a new
-accounts or closes their existing account, since it might be the account ahead
-of the interrupted user (who might be in the middle of signing a transaction).
-
-A straightforward solution is to create 2 UTxOs for every account such that one
-corresponds to user's place in the association list, while the other is free
-from disturbances, dedicate for user deposits/withdrawals.
-
 ### Ecosystem Participation
 
 In this approach where all users share the same address, it becomes impossible
@@ -60,8 +49,9 @@ requirement).
 One solution is to dedicate an address for each user, where the differing
 parameter is their usernames. This, along with the dual-NFT minting solution
 mentioned earlier (where the second NFT is sent to user's dedicated address),
-and passing of [CIP-0112]() will allow `cardano-account` users participate in
-the ecosystem similar to wallet owners.
+and passing of [CIP-0112](https://github.com/cardano-foundation/CIPs/pull/749) will
+allow `cardano-account` users participate in the ecosystem similar to wallet
+owners.
 
 ## A More Detailed Walkthrough
 
@@ -83,24 +73,22 @@ the required fee and collateral UTxO(s).
 
 ### Deposits
 
-Currently, the contract allows anyone to add arbitrary tokens to an account's
-UTxO. However, this is flawed since it has the risk of "token dust attack,"
-where the attacker can fill a UTxO with random tokens in order to make the UTxO
-so big such that it can not fit in any future transactions, consequently locking
-all its funds.
+Currently, the contract allows anyone to increase the Lovelace count of any
+account UTxOs. Idealy, payments should be possible with any tokens, but this
+puts the UTxO at the risk of [token dust attack](https://plutonomicon/github.io/plutonomicon/vulnerabilities#utxo-value-size-spam-aka-token-dust-attack).
 
-Please read the [Compromises and Issues](#compromises-and-issues) section to
-learn how a more proper logic can be implemented.
+One solution would be limiting the policy IDs an account is willing to accept,
+which expands this limit with consent of the account's owner.
 
 ### Withdrawals
 
 1. User types in their username and password, and the funds they want to
    withdraw
-2. System finds the UTxO by hashing the raw username (which is how it was stored
-   in the first place)
+2. System hashes the raw username, drops its first byte (since the first byte
+   is used to distinguish the list entry's and account's token names), and looks
+   to find the UTxO which stores an NFT with this token name
 3. Ensures that double salt-and-hashing the raw password corresponds to the one
    stored on-chain
 4. And builds the transaction such that the redeemer contains first iteration of
    salt-and-hashing of the password
 
-## Future

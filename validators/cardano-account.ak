@@ -11,7 +11,7 @@ use aiken/transaction.{
 use aiken/transaction/credential.{
   Address, Script, ScriptCredential, StakeCredential, VerificationKey,
 }
-use aiken/transaction/value.{MintedValue, PolicyId, Value}
+use aiken/transaction/value.{MintedValue, Value}
 use cardano_account/utils as utils
 
 // DATATYPES
@@ -19,12 +19,8 @@ type VerificationKeyHash =
   Hash<Blake2b_224, VerificationKey>
 
 type Datum {
-  RecordHead { next_username: Option<ByteArray> }
-  Account {
-    password_hash: ByteArray,
-    nonce: ByteArray,
-    next_username: Option<ByteArray>,
-  }
+  Entry { next_username: Option<ByteArray> }
+  Account { password_hash: ByteArray, nonce: ByteArray }
 }
 
 type MintAction {
@@ -33,7 +29,8 @@ type MintAction {
   CloseAccount {
     providers_index: Int,
     providers_signature_index: Int,
-    prev_elements_out_ref: OutputReference,
+    prev_entrys_out_ref: OutputReference,
+    entrys_out_ref: OutputReference,
     accounts_out_ref: OutputReference,
     presalt_password: ByteArray,
   }
@@ -41,10 +38,7 @@ type MintAction {
 
 type SpendAction {
   AppendToNewAccount { input_index: Int }
-  Deposit {
-    input_index: Int,
-    deposit_value: List<(PolicyId, List<(ByteArray, Int)>)>,
-  }
+  Deposit { input_index: Int, lovelace_count: Int }
   Withdraw {
     input_index: Int,
     providers_index: Int,
@@ -54,6 +48,18 @@ type SpendAction {
   }
   DepleteAccount { input_index: Int }
 }
+
+// CONSTANTS
+
+// In case of wanting to change these values, make sure to preserve this
+// lexicographic order.
+const entrys_token_name_byte_value = 0
+
+const entrys_token_name_byte = #"00"
+
+const accounts_token_name_byte_value = 1
+
+const accounts_token_name_byte = #"01"
 
 // THE VALIDATOR
 validator(
@@ -65,15 +71,6 @@ validator(
     expect ScriptContext { transaction: tx, purpose: Mint(own_policy) } = ctx
 
     let Transaction { inputs, outputs, mint, .. } = tx
-
-    expect [mint_triplet] =
-      mint
-        |> value.from_minted_value
-        |> value.flatten
-
-    let (mint_policy, mint_name, mint_quantity) = mint_triplet
-
-    expect (mint_policy == own_policy)?
 
     let own_script_cred = ScriptCredential(own_policy)
 
@@ -91,8 +88,12 @@ validator(
           list.any(inputs, fn(input) { input.output_reference == utxo_ref })?
 
         // Only a single, nameless token must be minted.
+        expect [mint_triplet] =
+          mint
+            |> value.from_minted_value
+            |> value.flatten
+        expect (_, mint_name, 1) = mint_triplet
         expect (mint_name == #"")?
-        expect (mint_quantity == 1)?
 
         // First produced UTxO must go to the script, and providers stake
         // credential.
@@ -112,7 +113,7 @@ validator(
         expect (dest_stake_cred == providers_stake_cred)?
 
         // Linked list must be empty at initiation.
-        expect RecordHead { next_username: None }: Datum = list_head_datum
+        expect Entry { next_username: None }: Datum = list_head_datum
 
         // List head UTxO must contain only one other asset apart from
         // Lovelaces.
@@ -122,25 +123,40 @@ validator(
         (list_head_asset == mint_triplet)?
       }
       MintNewAccount { username, password_hash } -> {
-        // Requires the proper link in the list to be spent so that its datum
-        // correctly points to the new account's username. The proper link is
-        // a previously created account (or the head of the list) such that:
-        // 1. Its username is smaller than the new account's
+        // Requires the proper entry in the list to be spent so that its datum
+        // correctly points to the new account's username. The proper entry is
+        // a previously created entry such that:
+        // 1. Its own token name (i.e. `entrys_token_name_byte` + username) is
+        //    smaller than the new account's entry token name
         // 2. The account it (potentially) points to as its `next_username` has
         //    a username that is larger than the new account's
-        // TODO: Note that this is flawed as addition/removal of an account can
-        //       disrupt the account UTxO of another user. A more proper
-        //       approach is to decouple the username UTxOs from balance UTxOs.
 
-        // A signle asset must be minted for `username`.
-        expect (username == mint_name)?
-        expect (mint_quantity == 1)?
+        // Security measure to prevent raw usernames getting submitted. It's 31
+        // rather than 32 since one extra byte needs to be prepended.
+        expect (bytearray.length(username) == 31)?
+
+        // Exactly two assets must be minted for `username`.
+        expect [(_, entrys_mint_name, 1), (_, accounts_mint_name, 1)] =
+          mint
+            |> value.from_minted_value
+            |> value.flatten
+
+        let entrys_token_name =
+          username |> bytearray.push(entrys_token_name_byte_value)
+
+        let accounts_token_name =
+          username |> bytearray.push(accounts_token_name_byte_value)
+
+        expect and {
+            entrys_mint_name == entrys_token_name,
+            accounts_mint_name == accounts_token_name,
+          }?
 
         // Only 1 UTxO must be getting spent from the script address.
         expect [
           Input {
             output: Output {
-              datum: InlineDatum(head_or_prev_user_datum),
+              datum: InlineDatum(prev_entry),
               value: curr_value,
               ..
             },
@@ -166,27 +182,24 @@ validator(
         let (curr_asset_policy, curr_asset_tn, _) = curr_asset
         expect and {
             curr_asset_policy == own_policy,
-            bytearray.compare(curr_asset_tn, username) == Less,
+            bytearray.compare(curr_asset_tn, entrys_token_name) == Less,
           }?
 
-        expect d: Datum = head_or_prev_user_datum
-        let (next_username, updated_datum) =
-          when d is {
-            RecordHead { next_username } ->
-              (next_username, RecordHead(Some(username)))
-            Account { password_hash, nonce, next_username } ->
-              (next_username, Account(password_hash, nonce, Some(username)))
-          }
+        expect Entry { next_username }: Datum = prev_entry
+        let updated_datum = Entry { next_username: Some(username) }
 
         // New username must be smaller than a potential next user.
         expect
           when next_username is {
             None -> True
             Some(prev_next_user) ->
-              bytearray.compare(username, prev_next_user) == Less
+              bytearray.compare(entrys_token_name, prev_next_user) == Less
           }?
 
-        // First 2 outputs are expected to be produced at the script address.
+        // First 3 outputs are expected to be produced at the script address:
+        // 1. The updated previous entry input
+        // 2. New entry
+        // 3. User's account UTxO
         expect [
           Output {
             address: Address {
@@ -206,46 +219,63 @@ validator(
             datum: o1_datum,
             reference_script: None,
           },
+          Output {
+            address: Address {
+              payment_credential: o2_pay_cred,
+              stake_credential: Some(o2_stake_cred),
+            },
+            value: o2_value,
+            datum: o2_datum,
+            reference_script: None,
+          },
           ..
         ] = outputs
 
-        let account_datum: Datum =
-          Account {
-            password_hash,
-            nonce: cbor.serialise(own_out_ref),
-            next_username,
-          }
+        let entrys_datum: Datum = Entry { next_username }
+        let (entrys_asset_policy, entrys_asset_name, entrys_asset_quantity) =
+          utils.get_single_asset_from_value(o1_value)
+
+        let accounts_datum: Datum =
+          Account { password_hash, nonce: cbor.serialise(own_out_ref) }
         let (
           accounts_asset_policy,
           accounts_asset_name,
           accounts_asset_quantity,
-        ) = utils.get_single_asset_from_value(o1_value)
+        ) = utils.get_single_asset_from_value(o2_value)
 
         and {
           o0_pay_cred == own_script_cred,
           o1_pay_cred == own_script_cred,
+          o2_pay_cred == own_script_cred,
           o0_stake_cred == providers_stake_cred,
           o1_stake_cred == providers_stake_cred,
+          o2_stake_cred == providers_stake_cred,
           o0_datum == InlineDatum(updated_datum),
-          o1_datum == InlineDatum(account_datum),
+          o1_datum == InlineDatum(entrys_datum),
+          o2_datum == InlineDatum(accounts_datum),
           o0_value == curr_value,
+          entrys_asset_policy == own_policy,
+          entrys_asset_name == entrys_token_name,
+          entrys_asset_quantity == 1,
           accounts_asset_policy == own_policy,
-          accounts_asset_name == username,
+          accounts_asset_name == accounts_token_name,
           accounts_asset_quantity == 1,
         }?
       }
       CloseAccount {
         providers_index,
         providers_signature_index,
-        prev_elements_out_ref,
+        prev_entrys_out_ref,
+        entrys_out_ref,
         accounts_out_ref,
         presalt_password,
       } -> {
         // This is essentially a combination of the account creation and the
         // withdrawal endpoints.
-        // 1. Two UTxOs are expected to be spent such that one of them points to
-        //    the closing account's username
-        // 2. The closing account's NFT must be getting burnt
+        // 1. Three UTxOs are expected to be spent such that one of them points
+        //    to the closing account's username, and the other two are closing
+        //    account's entry and balance UTxOs
+        // 2. The closing account's NFTs must be getting burnt
         // 3. Datum of the previous account must be updated so that it points to
         //    the (potential) account that the closing account points to
 
@@ -261,6 +291,7 @@ validator(
         expect [
           Input { output: o0, output_reference: o0_out_ref },
           Input { output: o1, output_reference: o1_out_ref },
+          Input { output: o2, output_reference: o2_out_ref },
         ] =
           list.filter(
             inputs,
@@ -275,6 +306,16 @@ validator(
               payment_credential == own_script_cred
             },
           )
+        let o0_is_prev = o0_out_ref == prev_entrys_out_ref
+        let o0_is_entrys = o0_out_ref == entrys_out_ref
+        let o0_is_accounts = o0_out_ref == accounts_out_ref
+        let o1_is_prev = o1_out_ref == prev_entrys_out_ref
+        let o1_is_entrys = o1_out_ref == entrys_out_ref
+        let o1_is_accounts = o1_out_ref == accounts_out_ref
+        let o2_is_prev = o2_out_ref == prev_entrys_out_ref
+        let o2_is_entrys = o2_out_ref == entrys_out_ref
+        let o2_is_accounts = o2_out_ref == accounts_out_ref
+
         expect (
           Output {
             datum: InlineDatum(prev_datum),
@@ -282,53 +323,86 @@ validator(
             address: prev_address,
             ..
           },
+          Output { datum: InlineDatum(entrys_datum), value: entrys_value, .. },
           Output {
             datum: InlineDatum(accounts_datum),
             value: accounts_value,
             ..
           },
         ) =
-          if
-          o0_out_ref == prev_elements_out_ref && o1_out_ref == accounts_out_ref{
-          
-            (o0, o1)
-          } else if o1_out_ref == prev_elements_out_ref && o0_out_ref == accounts_out_ref {
-            (o1, o0)
+          if and {
+            o0_is_prev,
+            o1_is_entrys,
+            o2_is_accounts,
+          } {
+            (o0, o1, o2)
+          } else if and {
+            o0_is_prev,
+            o2_is_entrys,
+            o1_is_accounts,
+          } {
+            (o0, o2, o1)
+          } else if and {
+            o1_is_prev,
+            o0_is_entrys,
+            o2_is_accounts,
+          } {
+            (o1, o0, o2)
+          } else if and {
+            o1_is_prev,
+            o2_is_entrys,
+            o0_is_accounts,
+          } {
+            (o1, o2, o0)
+          } else if and {
+            o2_is_prev,
+            o0_is_entrys,
+            o1_is_accounts,
+          } {
+            (o2, o0, o1)
+          } else if and {
+            o2_is_prev,
+            o1_is_entrys,
+            o0_is_accounts,
+          } {
+            (o2, o1, o0)
           } else {
             fail @"Given out refs don't match with found inputs properly"
           }
-        expect [(closing_username, _)] =
+
+        expect [(entrys_token_name, _)] =
+          entrys_value
+            |> value.tokens(own_policy)
+            |> dict.to_list
+        expect (bytearray.take(entrys_token_name, 1) == entrys_token_name_byte)?
+
+        expect [(accounts_token_name, _)] =
           accounts_value
             |> value.tokens(own_policy)
             |> dict.to_list
+
+        expect
+          (bytearray.take(accounts_token_name, 1) == accounts_token_name_byte)?
+
+        let closing_username = bytearray.drop(accounts_token_name, 1)
+
+        expect (bytearray.drop(entrys_token_name, 1) == closing_username)?
+
+        expect Entry{next_username: Some(stored_closing_username)}: Datum =
+          prev_datum
+
+        expect (stored_closing_username == closing_username)?
+
+        expect Entry { next_username: prevs_new_next_username }: Datum =
+          entrys_datum
+
         expect Account {
           password_hash: accounts_password_hash,
           nonce: accounts_nonce,
-          next_username: prevs_new_next_username,
         }: Datum = accounts_datum
-        expect prev_datum_coerced: Datum = prev_datum
-        let prev_accounts_updated_datum: Data =
-          when prev_datum_coerced is {
-            RecordHead{next_username: Some(stored_closing_username)} -> {
-              // Closing account's username must match with the previous UTxO's
-              // datum.
-              expect (closing_username == stored_closing_username)?
-              RecordHead { next_username: prevs_new_next_username }
-            }
-            Account {
-              password_hash: pw,
-              nonce: n,
-              next_username: Some(stored_closing_username),
-            } -> {
-              expect (closing_username == stored_closing_username)?
-              Account {
-                password_hash: pw,
-                nonce: n,
-                next_username: prevs_new_next_username,
-              }
-            }
-            _ -> fail @"Invalid account configuration encountered"
-          }
+
+        let prev_entrys_updated_datum: Data =
+          Entry { next_username: prevs_new_next_username }
 
         // First produced UTxO must go back to the script.
         expect [
@@ -340,15 +414,31 @@ validator(
           },
           ..
         ] = outputs
+
+        // Exactly two assets must be getting burnt for `closing_username`.
+        expect [(_, entrys_mint_name, -1), (_, accounts_mint_name, -1)] =
+          mint
+            |> value.from_minted_value
+            |> value.flatten
+
+        let entrys_token_name =
+          closing_username |> bytearray.push(entrys_token_name_byte_value)
+
+        let accounts_token_name =
+          closing_username |> bytearray.push(accounts_token_name_byte_value)
+
+        expect and {
+            entrys_mint_name == entrys_token_name,
+            accounts_mint_name == accounts_token_name,
+          }?
+
         and {
-          mint_name == closing_username,
-          mint_quantity == -1,
           password_is_valid(
             accounts_password_hash,
             accounts_nonce,
             presalt_password,
           ),
-          cont_prev_datum == prev_accounts_updated_datum,
+          cont_prev_datum == prev_entrys_updated_datum,
           prev_value == cont_prev_value,
           prev_address == cont_prev_address,
         }?
@@ -377,25 +467,12 @@ validator(
         let mint_quantity = get_single_mint_quantity_of(mint, own_script)
         mint_quantity == 1
       }
-      Deposit { input_index, deposit_value } -> {
-        // Allows anyone to "charge" an account. However this puts accounts in
-        // danger of the token dust attacks.
-        // TODO: Limit the maximum number of tokens an account can hold—perhaps
-        //       even limit it to only Ada.
+      Deposit { input_index, lovelace_count } -> {
+        // Allows anyone to "charge" an account. This is limited to Ada to
+        // prevent token dust attacks.
 
-        let deposit_value_value: Value = value.from_asset_list(deposit_value)
-
-        // Always `True` to avoid perfoming a boolean operation on the
-        // accumulator.
-        let positive_deposits =
-          value.reduce(
-            deposit_value_value,
-            True,
-            fn(_, _, q: Int, _) -> Bool {
-              expect (q > 0)?
-              True
-            },
-          )
+        expect (lovelace_count > 0)?
+        let lovelace_value: Value = value.from_lovelace(lovelace_count)
 
         let Output {
           address: in_address,
@@ -416,10 +493,9 @@ validator(
         ] = outputs
 
         and {
-          positive_deposits,
           in_address == out_address,
           in_inline_datum == out_datum,
-          value.merge(in_value, deposit_value_value) == out_value,
+          value.merge(in_value, lovelace_value) == out_value,
         }?
       }
       Withdraw {
@@ -456,7 +532,7 @@ validator(
         } = get_own_input_at(inputs, own_out_ref, input_index)
 
         // Validate the password.
-        expect Account { password_hash, nonce, next_username }: Datum = in_datum
+        expect Account { password_hash, nonce }: Datum = in_datum
         expect password_is_valid(password_hash, nonce, presalt_password)?
 
         // Protection layer to prevent resubmitting the same password.
@@ -466,7 +542,6 @@ validator(
           Account {
             password_hash: new_password_hash,
             nonce: cbor.serialise(own_out_ref),
-            next_username,
           }
 
         expect [
