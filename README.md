@@ -18,8 +18,9 @@ its correctness.
 The validator performs the salting and hashing once again to make sure it'll
 match the stored hash in the datum.
 
-This allows utilizing all the password management solutions already existing,
-and therefore offers an easier onboarding solution for less experienced users.
+With this solution, users can utilize all the password management solutions
+already existing, and therefore offers an easier onboarding solution for less
+experienced users.
 
 ## Compromises and Issues
 
