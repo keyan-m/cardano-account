@@ -9,7 +9,7 @@ use aiken/transaction.{
   Transaction,
 }
 use aiken/transaction/credential.{
-  Address, Script, ScriptCredential, StakeCredential, VerificationKey,
+  Address, Script, ScriptCredential, VerificationKey,
 }
 use aiken/transaction/value.{MintedValue, Value}
 use cardano_account/utils as utils
@@ -62,11 +62,7 @@ const accounts_token_name_byte_value = 1
 const accounts_token_name_byte = #"01"
 
 // THE VALIDATOR
-validator(
-  utxo_ref: OutputReference,
-  providers: List<VerificationKeyHash>,
-  providers_stake_cred: StakeCredential,
-) {
+validator(utxo_ref: OutputReference, providers: List<VerificationKeyHash>) {
   fn mint(action: MintAction, ctx: ScriptContext) {
     expect ScriptContext { transaction: tx, purpose: Mint(own_policy) } = ctx
 
@@ -78,10 +74,8 @@ validator(
       InitiateRecord -> {
         // Initial endpoint for starting the linked list. Requirements are:
         // 1. Specified UTxO must be getting spent
-        // 2. A single, nameless NFT is minted at the script address, such that
-        //    its staking part is the same as the frontend provider's staking
-        //    credential
-        // 3. Output datum is `RecordHead { next_username: None }`
+        // 2. A single, nameless NFT is minted at the script address
+        // 3. Output datum is `Entry { next_username: None }`
 
         // To enforce a single initiation, the specified UTxO must be spent.
         expect
@@ -95,28 +89,22 @@ validator(
         expect (_, mint_name, 1) = mint_triplet
         expect (mint_name == #"")?
 
-        // First produced UTxO must go to the script, and providers stake
-        // credential.
+        // First produced UTxO must go to the script.
         expect [
           Output {
             datum: InlineDatum(list_head_datum),
             value: list_head_value,
-            address: Address {
-              payment_credential: dest_script_cred,
-              stake_credential: Some(dest_stake_cred),
-            },
+            address: Address { payment_credential: dest_script_cred, .. },
             reference_script: None,
           },
           ..
         ] = outputs
         expect (dest_script_cred == own_script_cred)?
-        expect (dest_stake_cred == providers_stake_cred)?
 
         // Linked list must be empty at initiation.
         expect Entry { next_username: None }: Datum = list_head_datum
 
-        // List head UTxO must contain only one other asset apart from
-        // Lovelaces.
+        // List head UTxO must contain only one other asset apart from ADA.
         let list_head_asset = utils.get_single_asset_from_value(list_head_value)
 
         // List head's asset must match the minted asset.
@@ -202,28 +190,19 @@ validator(
         // 3. User's account UTxO
         expect [
           Output {
-            address: Address {
-              payment_credential: o0_pay_cred,
-              stake_credential: Some(o0_stake_cred),
-            },
+            address: Address { payment_credential: o0_pay_cred, .. },
             value: o0_value,
             datum: o0_datum,
             reference_script: None,
           },
           Output {
-            address: Address {
-              payment_credential: o1_pay_cred,
-              stake_credential: Some(o1_stake_cred),
-            },
+            address: Address { payment_credential: o1_pay_cred, .. },
             value: o1_value,
             datum: o1_datum,
             reference_script: None,
           },
           Output {
-            address: Address {
-              payment_credential: o2_pay_cred,
-              stake_credential: Some(o2_stake_cred),
-            },
+            address: Address { payment_credential: o2_pay_cred, .. },
             value: o2_value,
             datum: o2_datum,
             reference_script: None,
@@ -247,9 +226,6 @@ validator(
           o0_pay_cred == own_script_cred,
           o1_pay_cred == own_script_cred,
           o2_pay_cred == own_script_cred,
-          o0_stake_cred == providers_stake_cred,
-          o1_stake_cred == providers_stake_cred,
-          o2_stake_cred == providers_stake_cred,
           o0_datum == InlineDatum(updated_datum),
           o1_datum == InlineDatum(entrys_datum),
           o2_datum == InlineDatum(accounts_datum),
@@ -370,16 +346,16 @@ validator(
             fail @"Given out refs don't match with found inputs properly"
           }
 
-        expect [(entrys_token_name, _)] =
+        expect [Pair(entrys_token_name, _)] =
           entrys_value
             |> value.tokens(own_policy)
-            |> dict.to_list
+            |> dict.to_pairs
         expect (bytearray.take(entrys_token_name, 1) == entrys_token_name_byte)?
 
-        expect [(accounts_token_name, _)] =
+        expect [Pair(accounts_token_name, _)] =
           accounts_value
             |> value.tokens(own_policy)
-            |> dict.to_list
+            |> dict.to_pairs
 
         expect
           (bytearray.take(accounts_token_name, 1) == accounts_token_name_byte)?
@@ -556,14 +532,14 @@ validator(
 
         // Only requirement is that username's NFT is not leaving the UTxO. No
         // need to check the quantities here.
-        expect [(in_username, _)] =
+        expect [Pair(in_username, _)] =
           in_value
             |> value.tokens(own_script)
-            |> dict.to_list
-        expect [(out_username, _)] =
+            |> dict.to_pairs
+        expect [Pair(out_username, _)] =
           out_value
             |> value.tokens(own_script)
-            |> dict.to_list
+            |> dict.to_pairs
 
         and {
           in_address == out_address,

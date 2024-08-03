@@ -18,7 +18,7 @@
 # Cardano Account: A Wallet-less Solution
 
 An alternate solution to Cardano wallets to simplify the adoption by allowing
-users to take custody of their Ada with a username and password—similar to web2
+users to take custody of their ADA with a username and password—similar to web2
 conventions.
 
 ## How does it work?
@@ -51,9 +51,6 @@ If this requirement was not put in place, a node validator would be free to
 avoid submitting the transaction honestly, but rather remove the transaction,
 use the provided redeemer, and withdraw the account in its own favor.
 
-This is an issue that is likely not solvable without changes to Cardano's
-infrastructure.
-
 While this is not an ideal solution, it mitigates the required centralization by
 allowing users to use any of the providers.
 
@@ -64,9 +61,9 @@ for them to use most Cardano DApps (since user signature is a common
 requirement).
 
 One solution is to dedicate an address for each user, where the differing
-parameter is their usernames. This, along with the dual-NFT minting solution
-mentioned earlier (where the second NFT is sent to user's dedicated address),
-and passing of [CIP-112](https://github.com/cardano-foundation/CIPs/pull/749) will
+parameter is their usernames. This, along with a dual-NFT minting solution
+(where the second NFT is sent to user's dedicated address), and passing
+of [CIP-112](https://github.com/cardano-foundation/CIPs/pull/749) will
 allow `cardano-account` users participate in the ecosystem similar to wallet
 owners.
 
