@@ -29,8 +29,7 @@ datum (which comes from a spent UTxO in order to satisfy uniqueness and, to some
 extent, randomness).
 
 The contract only verifies the signature and doesn't care about the underlying
-seed of the key pair. However, this seed can be generated using the following
-hash:
+seed of the key pair. However, the following hash can be used as seed:
 ```
 [ nonce, raw_username, raw_password ]
 ```
