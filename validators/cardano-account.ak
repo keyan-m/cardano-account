@@ -2,23 +2,18 @@
 use aiken/bytearray
 use aiken/cbor
 use aiken/dict
-use aiken/hash.{Blake2b_224, Hash}
 use aiken/list
 use aiken/transaction.{
   InlineDatum, Input, Mint, Output, OutputReference, ScriptContext, Spend,
   Transaction,
 }
-use aiken/transaction/credential.{Address, Script, ScriptCredential}
-use aiken/transaction/value.{MintedValue, Value}
-use cardano_account/utils as utils
+use aiken/transaction/credential.{Address, ScriptCredential}
+use aiken/transaction/value.{Value}
+use cardano_account/utils.{ScriptHash} as utils
 
 // DATATYPES
-type ScriptHash =
-  Hash<Blake2b_224, Script>
-
 type Datum {
   Entry { next_username: Option<ByteArray> }
-  // Account { password_hash: ByteArray, nonce: ByteArray }
   Account { pubkey: ByteArray, nonce: ByteArray }
 }
 
@@ -413,9 +408,9 @@ validator(utxo_ref: OutputReference) {
             ..
           },
           ..
-        } = get_own_input_at(inputs, own_out_ref, input_index)
+        } = utils.get_own_input_at(inputs, own_out_ref, input_index)
 
-        let mint_quantity = get_single_mint_quantity_of(mint, own_script)
+        let mint_quantity = utils.get_single_mint_quantity_of(mint, own_script)
         mint_quantity == 1
       }
       Deposit { input_index, lovelace_count } -> {
@@ -430,7 +425,7 @@ validator(utxo_ref: OutputReference) {
           value: in_value,
           datum: in_inline_datum,
           ..
-        } = get_own_input_at(inputs, own_out_ref, input_index)
+        } = utils.get_own_input_at(inputs, own_out_ref, input_index)
 
         // First output must be the reproduced UTxO.
         expect [
@@ -523,9 +518,9 @@ validator(utxo_ref: OutputReference) {
             ..
           },
           ..
-        } = get_own_input_at(inputs, own_out_ref, input_index)
+        } = utils.get_own_input_at(inputs, own_out_ref, input_index)
 
-        let mint_quantity = get_single_mint_quantity_of(mint, own_script)
+        let mint_quantity = utils.get_single_mint_quantity_of(mint, own_script)
         mint_quantity == -1
       }
     }
@@ -533,29 +528,6 @@ validator(utxo_ref: OutputReference) {
 }
 
 // HELPER FUNCTIONS
-fn get_own_input_at(
-  inputs: List<Input>,
-  own_out_ref: OutputReference,
-  input_index: Int,
-) -> Output {
-  expect Some(Input { output: own_utxo, output_reference: spent_own_out_ref }) =
-    list.at(inputs, input_index)
-  expect (own_out_ref == spent_own_out_ref)?
-  own_utxo
-}
-
-fn get_single_mint_quantity_of(
-  mint: MintedValue,
-  target_policy: Hash<Blake2b_224, Script>,
-) -> Int {
-  expect [(mint_policy, _, mint_quantity)] =
-    mint
-      |> value.from_minted_value
-      |> value.flatten
-  expect (mint_policy == target_policy)?
-  mint_quantity
-}
-
 // Checks:
 // 1. The input index matches the spending outref
 // 2. Address of output at index 0 has the same payment part as the input
@@ -578,7 +550,7 @@ fn validate_spending_utxo_at_index_and_continuing_output(
     address: Address { payment_credential: ScriptCredential(own_script), .. },
     value: in_value,
     ..
-  } = get_own_input_at(inputs, own_out_ref, input_index)
+  } = utils.get_own_input_at(inputs, own_out_ref, input_index)
 
   // Validate the password.
   expect Account { pubkey: curr_pubkey, .. }: Datum = in_datum
