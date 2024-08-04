@@ -17,42 +17,38 @@
 
 # Cardano Account: A Wallet-less Solution
 
-An alternate solution to Cardano wallets to simplify the adoption by allowing
-users to take custody of their ADA with a username and password—similar to web2
-conventions.
+An alternate solution to Cardano wallets for simplifying the adoption by
+allowing users to take custody of their ADA with a username and password—similar
+to web2 conventions.
 
 ## How does it work?
 
-By allocating a UTxO for each username, withdrawals can be locked behind a
-twice salted and hashed password, where its nonce comes from a spent UTxO (which
-satisfies randomness and uniqueness required for a nonce).
+By allocating a UTxO for each username, withdrawals can be unlocked using an
+ED25519 signature, where its key pair is generated using a nonce stored in the
+datum (which comes from a spent UTxO in order to satisfy uniqueness and, to some
+extent, randomness).
 
-For the user to withdraw their funds, they can provide the hash of their salted
-raw password. This way, the redeemer (which will publicly be available on-chain)
-won't reveal user's password, yet it securely allows the contract to validate
-its correctness.
+The contract only verifies the signature and doesn't care about the underlying
+seed of the key pair. However, this seed can be generated using the following
+hash:
+```
+[ nonce, raw_username, raw_password ]
+```
 
-The validator performs the salting and hashing once again to make sure it'll
-match the stored hash in the datum.
+Where `,` has been used to notate concatenation, and `[ ]` indicates hashing.
+
+For the user to withdraw their funds, they should provide their username and
+password to the frontend provider, after which their account UTxO will be
+fetched, their account seed constructed, and their key pair generated.
+
+Using the private key of this pair, users can now sign any withdrawal
+transactions.
 
 With this solution, users can utilize all the password management solutions
 already existing, and therefore offers a smoother onboarding process for less
 experienced users.
 
 ## Compromises and Issues
-
-### Front Running
-
-Implemented as is, the script is parametrized by a list of "providers" (i.e.
-frontend providers), so that it can validate one of them has signed the
-transaction.
-
-If this requirement was not put in place, a node validator would be free to
-avoid submitting the transaction honestly, but rather remove the transaction,
-use the provided redeemer, and withdraw the account in its own favor.
-
-While this is not an ideal solution, it mitigates the required centralization by
-allowing users to use any of the providers.
 
 ### Ecosystem Participation
 
@@ -61,8 +57,7 @@ for them to use most Cardano DApps (since user signature is a common
 requirement).
 
 One solution is to dedicate an address for each user, where the differing
-parameter is their usernames. This, along with a dual-NFT minting solution
-(where the second NFT is sent to user's dedicated address), and passing
+parameter is their usernames. This, along with passing
 of [CIP-112](https://github.com/cardano-foundation/CIPs/pull/749) will
 allow `cardano-account` users participate in the ecosystem similar to wallet
 owners.
@@ -76,20 +71,22 @@ owners.
    list), the platform builds the transaction that consumes the previous
    link/UTxO in the list
 3. It uses the output reference of link's UTxO as nonce, concatenates it to the
-   provided raw password and hashes the result
-4. Repeats step 3 to achieve the password hash that should be stored in the
-   user's account datum
-5. Store the nonce alongside the password hash
-6. Submit the transaction
+   provided raw username and raw password, and hashes the result
+4. It uses this hash as the seed for generating an ED25519 key pair
+5. Store the nonce alongside the verification/public key of the pair
+6. With the outputs of the transaction now determined, the platform uses the
+   acquired private key to sign the outputs, and provide it as the redeemer
+7. Submit the transaction
 
 Here it's assumed the the platform that's providing this service also provides
-the required fee and collateral UTxO(s).
+the required fee, minimum required ADA for the account UTxO, and collateral
+UTxO(s).
 
 ### Deposits
 
-Currently, the contract allows anyone to increase the Lovelace count of any
-account UTxOs. Idealy, payments should be possible with any tokens, but this
-puts the UTxO at the risk of [token dust attack](https://plutonomicon.github.io/plutonomicon/vulnerabilities#utxo-value-size-spam-aka-token-dust-attack).
+Currently, the contract allows anyone to increase ADA of any account UTxOs.
+Idealy, payments should be possible with any tokens, but this puts the UTxO at
+the risk of [token dust attack](https://plutonomicon.github.io/plutonomicon/vulnerabilities#utxo-value-size-spam-aka-token-dust-attack).
 
 One solution would be limiting the policy IDs an account is willing to accept,
 which expands this limit with consent of the account's owner.
@@ -106,10 +103,12 @@ allows scripts to spend datum-less UTxOs.
 2. System hashes the raw username, drops its first byte (since the first byte
    is used to distinguish the list entry's and account's token names), and looks
    to find the UTxO which stores an NFT with this token name
-3. Ensures that double salt-and-hashing the raw password corresponds to the one
-   stored on-chain
-4. And builds the transaction such that the redeemer contains first iteration of
-   salt-and-hashing of the password
+3. The platform uses the stored nonce, along with raw username and password of
+   the user to generate the ED25519 key pair
+4. Builds the transaction with proper outputs
+5. Using user's private key, signs the outputs of this transaction
+4. And finalizes the transaction such that the redeemer contains the signature
+   that can be verified on-chain using the user's stored public key
 
 ## Disclaimer
 
