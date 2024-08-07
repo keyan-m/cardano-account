@@ -43,6 +43,19 @@ pub fn get_own_input_at(
   own_utxo
 }
 
+pub fn resolve_output_reference(
+  inputs: List<Input>,
+  output_ref: OutputReference,
+) -> Output {
+  expect [input, ..inputs] = inputs
+
+  if input.output_reference == output_ref {
+    input.output
+  } else {
+    resolve_output_reference(inputs, output_ref)
+  }
+}
+
 pub fn outputs_signed_by_ed25519_key(
   verification_key: ByteArray,
   outputs: List<Output>,

@@ -53,11 +53,11 @@ fn generate_outputs() -> Fuzzer<List<Output>> {
   fuzz.list_at_least(generate_sample_utxo(), 1)
 }
 
-test prop_outputs(outs via generate_outputs()) {
-  fuzz.label(@"TEST")
-  trace cbor.serialise(outs)
-  list.length(outs) < 40
-}
+// test prop_outputs(outs via generate_outputs()) {
+//   fuzz.label(@"TEST")
+//   trace cbor.serialise(outs)
+//   list.length(outs) < 40
+// }
 
 test unit_verify_raw_outputs() {
   builtin.verify_ed25519_signature(

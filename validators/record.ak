@@ -9,9 +9,13 @@ use aiken/transaction.{
 }
 use aiken/transaction/credential.{Address, ScriptCredential}
 use aiken/transaction/value.{Value}
+use cardano_account/constants.{
+  entrys_token_name_byte_value, entrys_token_name_byte,
+  accounts_token_name_byte_value, accounts_token_name_byte
+}
 use cardano_account/utils.{ScriptHash} as utils
 
-// DATATYPES
+// === DATATYPES ===============================================================
 type Datum {
   Entry { next_username: Option<ByteArray> }
   Account { pubkey: ByteArray, nonce: ByteArray }
@@ -35,19 +39,7 @@ type SpendAction {
   DepleteAccount { input_index: Int }
 }
 
-// CONSTANTS
-
-// In case of wanting to change these values, make sure to preserve this
-// lexicographic order.
-const entrys_token_name_byte_value = 0
-
-const entrys_token_name_byte = #"00"
-
-const accounts_token_name_byte_value = 1
-
-const accounts_token_name_byte = #"01"
-
-// THE VALIDATOR
+// === THE VALIDATOR ===========================================================
 validator(utxo_ref: OutputReference) {
   fn mint(action: MintAction, ctx: ScriptContext) {
     expect ScriptContext { transaction: tx, purpose: Mint(own_policy) } = ctx
@@ -527,7 +519,7 @@ validator(utxo_ref: OutputReference) {
   }
 }
 
-// HELPER FUNCTIONS
+// === HELPER FUNCTIONS ========================================================
 // Checks:
 // 1. The input index matches the spending outref
 // 2. Address of output at index 0 has the same payment part as the input
