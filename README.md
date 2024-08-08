@@ -29,7 +29,7 @@ extent, randomness).
 The contract only verifies the signature and doesn't care about the underlying
 seed of the key pair. However, the following hash can be used as seed:
 ```
-[ nonce, raw_username, raw_password ]
+[ nonce, [ raw_username ], [ raw_password ] ]
 ```
 
 Where `,` has been used to notate concatenation, and `[ ]` indicates hashing.
@@ -70,7 +70,7 @@ presumably used to generate the key pair.
    list), the platform builds the transaction that consumes the previous
    link/UTxO in the list
 3. It uses the output reference of link's UTxO as nonce, concatenates it to the
-   provided raw username and raw password, and hashes the result
+   hashes of the provided raw username and raw password, and hashes the result
 4. It uses this hash as the seed for generating an ED25519 key pair
 5. Store the nonce alongside the verification/public key of the generated pair
 6. With the outputs of the transaction now determined, the platform uses the
@@ -97,8 +97,8 @@ share it with others.
 2. System hashes the raw username, drops its first byte (since the first byte
    is used to distinguish the list entry's and account's token names), and looks
    to find the UTxO which stores an NFT with this token name
-3. The platform uses the stored nonce, along with raw username and password of
-   the user to generate the ED25519 key pair
+3. The platform uses the stored nonce, along with username and password of the
+   user to generate the ED25519 key pair
 4. Builds the transaction with proper outputs
 5. Using user's private key, signs the outputs of this transaction
 4. And finalizes the transaction such that the redeemer contains the signature
