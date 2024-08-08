@@ -46,21 +46,23 @@ With this solution, users can utilize all the password management solutions
 already existing, and therefore offers a smoother onboarding process for less
 experienced users.
 
-## Compromises and Issues
+## Technical Details
 
-### Ecosystem Participation
+The `account` contract relies on the `record` contract, where all registered
+accounts are stored in order to guarantee uniqueness of usernames.
 
-In this approach where all users share the same address, it becomes impossible
-for them to use most Cardano DApps (since user signature is a common
-requirement).
+`account` works by requiring its info UTxO to be provided as reference, so that
+its "reward withdrawal" endpoint can verify the signature once, and allow
+multiple datum-less UTxOs to be spent with minimal execution budgets.
 
-One solution is to dedicate an address for each user, where the differing
-parameter is their usernames. This, along with passing
-of [CIP-112](https://github.com/cardano-foundation/CIPs/pull/749) will
-allow `cardano-account` users participate in the ecosystem similar to wallet
-owners.
+The "info UTxO" is authenticated by an NFT from the `record` validator, and a
+token name identical to the `username` parameter of the contract, prefixed with
+a single byte to distinguish it from the NFT stored in the linked list.
 
-## A More Detailed Walkthrough
+The datum carries user's ED25519 public key, along with the nonce that was
+presumably used to generate the key pair.
+
+## User Experience
 
 ### Account Creation
 
@@ -71,28 +73,23 @@ owners.
 3. It uses the output reference of link's UTxO as nonce, concatenates it to the
    provided raw username and raw password, and hashes the result
 4. It uses this hash as the seed for generating an ED25519 key pair
-5. Store the nonce alongside the verification/public key of the pair
+5. Store the nonce alongside the verification/public key of the generated pair
 6. With the outputs of the transaction now determined, the platform uses the
    acquired private key to sign the outputs, and provide it as the redeemer
 7. Submit the transaction
 
-Here it's assumed the the platform that's providing this service also provides
-the required fee, minimum required ADA for the account UTxO, and collateral
-UTxO(s).
+Here it's assumed the platform that's providing this service also provides the
+required fee, minimum required ADA for both the account UTxO and list entry
+UTxO, and also collateral UTxO(s).
 
 ### Deposits
 
-Currently, the contract allows anyone to increase ADA of any account UTxOs.
-Idealy, payments should be possible with any tokens, but this puts the UTxO at
-the risk of [token dust attack](https://plutonomicon.github.io/plutonomicon/vulnerabilities#utxo-value-size-spam-aka-token-dust-attack).
+Since each account UTxO is meant to be stored in a dedicated script address,
+this address can be used for arbitrary deposits, identical to a simple wallet.
 
-One solution would be limiting the policy IDs an account is willing to accept,
-which expands this limit with consent of the account's owner.
-
-Another limitation would be deposits from outside frontend providers (e.g.
-from CEXes). This is something that requires the separate address solution
-mentioned [earlier](#ecosystem-participation), and also passing of [CIP-69](https://github.com/cardano-foundation/CIPs/pull/321) which
-allows scripts to spend datum-less UTxOs.
+The frontend can either provide a payment platform, a standard for other wallets
+to implement, or simply allow users to query their address so that they can
+share it with others.
 
 ### Withdrawals
 
