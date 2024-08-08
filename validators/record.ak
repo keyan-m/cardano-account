@@ -9,8 +9,8 @@ use aiken/transaction.{
 use aiken/transaction/credential.{Address, ScriptCredential}
 use aiken/transaction/value
 use cardano_account/constants.{
-  entrys_token_name_byte_value, entrys_token_name_byte,
-  accounts_token_name_byte_value, accounts_token_name_byte
+  accounts_token_name_byte, accounts_token_name_byte_value,
+  entrys_token_name_byte, entrys_token_name_byte_value,
 }
 use cardano_account/types.{Account, AccountDatum} as types
 use cardano_account/utils as utils
@@ -262,7 +262,7 @@ validator(utxo_ref: OutputReference) {
                 ..
               } = i
               when payment_credential is {
-                ScriptCredential (_) -> True
+                ScriptCredential(_) -> True
                 _ -> False
               }
             },
@@ -340,10 +340,10 @@ validator(utxo_ref: OutputReference) {
         // Both entry UTxOs are expected to be coming from this script address,
         // while account's UTxO is expected to come from somewhere else.
         expect and {
-          prev_entrys_script_hash == own_policy,
-          closing_entrys_script_hash == own_policy,
-          !(accounts_script_hash == own_policy)
-        }?
+            prev_entrys_script_hash == own_policy,
+            closing_entrys_script_hash == own_policy,
+            !(accounts_script_hash == own_policy),
+          }?
 
         let (prev_entrys_policy, _, prev_entrys_qty) =
           utils.get_single_asset_from_value_apart_from_ada(prev_value)
@@ -353,15 +353,15 @@ validator(utxo_ref: OutputReference) {
           utils.get_single_asset_from_value_apart_from_ada(accounts_value)
 
         expect and {
-          prev_entrys_policy == own_policy,
-          entrys_policy == own_policy,
-          accounts_policy == own_policy,
-          bytearray.take(entrys_token_name, 1) == entrys_token_name_byte,
-          bytearray.take(accounts_token_name, 1) == accounts_token_name_byte,
-          prev_entrys_qty == 1,
-          entrys_qty == 1,
-          accounts_qty == 1,
-        }?
+            prev_entrys_policy == own_policy,
+            entrys_policy == own_policy,
+            accounts_policy == own_policy,
+            bytearray.take(entrys_token_name, 1) == entrys_token_name_byte,
+            bytearray.take(accounts_token_name, 1) == accounts_token_name_byte,
+            prev_entrys_qty == 1,
+            entrys_qty == 1,
+            accounts_qty == 1,
+          }?
 
         let closing_username = bytearray.drop(accounts_token_name, 1)
         expect (bytearray.drop(entrys_token_name, 1) == closing_username)?
@@ -385,7 +385,7 @@ validator(utxo_ref: OutputReference) {
             datum: InlineDatum(cont_prev_datum),
             value: cont_prev_value,
             address: Address {
-              payment_credential: ScriptCredential(cont_prev_script_hash)
+              payment_credential: ScriptCredential(cont_prev_script_hash),
               ..
             },
             reference_script: None,
