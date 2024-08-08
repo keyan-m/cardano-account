@@ -4,9 +4,8 @@
 
 * [Cardano Account: A Wallet-less Solution](#cardano-account-a-wallet-less-solution)
     * [How does it work?](#how-does-it-work)
-    * [Compromises and Issues](#compromises-and-issues)
-        * [Ecosystem Participation](#ecosystem-participation)
-    * [A More Detailed Walkthrough](#a-more-detailed-walkthrough)
+    * [Technical Details](#technical-details)
+    * [User Experience](#user-experience)
         * [Account Creation](#account-creation)
         * [Deposits](#deposits)
         * [Withdrawals](#withdrawals)
