@@ -14,7 +14,8 @@ use cardano_account/constants.{
 use cardano_account/types.{Account, AccountDatum, NoDatum}
 use cardano_account/utils.{
   ScriptHash, get_single_asset_from_value_apart_from_ada,
-  outputs_signed_by_ed25519_key, resolve_output_reference,
+  get_single_script_input, outputs_signed_by_ed25519_key,
+  resolve_output_reference,
 } as utils
 
 // === DATATYPES ===============================================================
@@ -22,12 +23,16 @@ type Intent {
   UpdatePubkey { signature: ByteArray }
   DeleteAccount
   ProveActivity
-  Withdraw { account_input_index: Int }
 }
 
 type AccountAction {
   Authorized { signature: ByteArray, intent: Intent }
-  OpenClaim { account_input_index: Int }
+  OpenClaim { accounts_input_index: Int }
+}
+
+type WithdrawAction {
+  VerifySpentAccount { accounts_input_index: Int }
+  VerifyStaleness { reference_input_index: Int }
 }
 
 // === THE VALIDATOR ===========================================================
@@ -35,75 +40,38 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
   fn spend(in_datum: AccountDatum, action: AccountAction, ctx: ScriptContext) {
     expect ScriptContext { transaction: tx, purpose: Spend(own_out_ref) } = ctx
 
-    let Transaction { inputs, outputs, mint, .. } = tx
+    let Transaction { inputs, outputs, mint, withdrawals, .. } = tx
 
     when action is {
-      Authorized { signature, intent } -> {
+      Authorized { signature, intent } ->
         when in_datum is {
           NoDatum -> {
-            expect Output {
-              address: Address {
-                payment_credential: ScriptCredential(own_script_hash),
-                ..
-              },
-              ..
-            } = resolve_output_reference(inputs, own_out_ref)
-            expect Withdraw { account_input_index } = intent
-            expect Some(Input {
-              output: Output {
-                address: Address {
-                  payment_credential: ScriptCredential(accounts_script_hash),
-                  ..
-                },
-                value: accounts_value,
-                ..
-              },
-              ..
-            }) = list.at(inputs, account_input_index)
-            let accounts_tn =
-              username |> bytearray.push(accounts_token_name_byte_value)
-            let (accounts_policy, accounts_token_name, accounts_qty) =
-              utils.get_single_asset_from_value_apart_from_ada(accounts_value)
-            and {
-              accounts_script_hash == own_script_hash,
-              accounts_policy == record_script_hash,
-              accounts_token_name == accounts_tn,
-              accounts_qty == 1, // TODO: Is this necessary?
-            }?
+            let Output { address: own_address, .. } =
+              resolve_output_reference(inputs, own_out_ref)
+
+            let own_withdrawal = Inline(own_address.payment_credential)
+
+            // This transaction has to be witnessed by the reward withdrawal
+            // endpoint of this validator. This allows efficient batch spends.
+            pairs.has_key(withdrawals, own_withdrawal)
           }
-          Account { pubkey, nonce: _nonce, latest_activity } -> {
+
+          Account { pubkey, nonce: _, latest_activity: _ } -> {
             // For changing the stored public key, or deleting the account, only
             // 1 UTxO must be getting spent from a script address (i.e. this
             // script).
-            expect [
-              Input {
-                output: Output {
-                  address: Address {
-                    payment_credential: ScriptCredential(own_script_hash),
-                    ..
-                  },
-                  value: in_value,
+            expect Input {
+              output: Output {
+                address: Address {
+                  payment_credential: ScriptCredential(own_script_hash),
                   ..
                 },
-                output_reference: own_out_ref,
+                value: in_value,
+                ..
               },
-            ] =
-              list.filter(
-                inputs,
-                fn(i) {
-                  let Input {
-                    output: Output {
-                      address: Address { payment_credential, .. },
-                      ..
-                    },
-                    ..
-                  } = i
-                  when payment_credential is {
-                    ScriptCredential(_) -> True
-                    _ -> False
-                  }
-                },
-              )
+              output_reference: own_out_ref,
+            } = get_single_script_input(inputs)
+
             let (accounts_policy, accounts_token_name, accounts_qty) =
               get_single_asset_from_value_apart_from_ada(in_value)
 
@@ -137,7 +105,7 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
                 expect Account {
                   pubkey: new_pubkey,
                   nonce: new_nonce,
-                  latest_activity: new_latest_activity
+                  latest_activity: new_latest_activity,
                 } = out_datum_data
 
                 // 1. Account UTxO must go back to the script
@@ -172,17 +140,58 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
 
                 (mint == expected_mint)?
               }
-              ProveActivity -> {
-                todo
-              }
-              _ -> False
+              ProveActivity -> todo
             }
           }
         }
+      OpenClaim { accounts_input_index } -> todo
+    }
+  }
+
+  // Verifies the authentic account UTxO is being spent, and that the outputs of
+  // the transaction are signed by the stored ED25519 public key.
+  fn withdraw(withdraw_action: WithdrawAction, ctx: ScriptContext) {
+    expect ScriptContext {
+      transaction: tx,
+      purpose: WithdrawFrom(Inline(ScriptCredential(own_script_hash))),
+    } = ctx
+    let Transaction { inputs, redeemers, .. } = tx
+    when withdraw_action is {
+      VerifySpentAccount { accounts_input_index } -> {
+        expect Some(Input {
+          output: Output {
+            address: Address {
+              payment_credential: ScriptCredential(accounts_script_hash),
+              ..
+            },
+            datum: InlineDatum(_),
+            value: accounts_value,
+            ..
+          },
+          output_reference: accounts_output_reference,
+        }) = list.at(inputs, accounts_input_index)
+
+        // Spending of the account UTxO must be authorized.
+        expect Some(accounts_redeemer_data) =
+          redeemers |> pairs.get_first(Spend(accounts_output_reference))
+        expect Authorized { intent, .. } = accounts_redeemer_data
+        expect (intent == ProveActivity)?
+
+        let accounts_tn =
+          username |> bytearray.push(accounts_token_name_byte_value)
+
+        let (accounts_policy, accounts_token_name, accounts_qty) =
+          utils.get_single_asset_from_value_apart_from_ada(accounts_value)
+
+        and {
+          accounts_script_hash == own_script_hash,
+          accounts_policy == record_script_hash,
+          accounts_token_name == accounts_tn,
+          // TODO: Is this necessary?
+          accounts_qty == 1,
+        }?
       }
-      OpenClaim { account_input_index } -> {
-        todo
-      }
+      VerifyStaleness { reference_input_index } -> todo
     }
   }
 }
