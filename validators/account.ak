@@ -184,6 +184,7 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
   // Verifies the authentic account UTxO is being spent, and that the outputs of
   // the transaction are signed by the stored ED25519 public key.
   fn withdraw(withdraw_action: WithdrawAction, ctx: ScriptContext) {
+    // TODO: Support de-registration of stale accounts.
     expect ScriptContext {
       transaction: tx,
       purpose: WithdrawFrom(Inline(ScriptCredential(own_script_hash))),

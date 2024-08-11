@@ -61,6 +61,19 @@ a single byte to distinguish it from the NFT stored in the linked list.
 The datum carries user's ED25519 public key, along with the nonce that was
 presumably used to generate the key pair.
 
+### Support for Open Claim of Stale Accounts
+
+The account datum carries a `latest_activity` field which has to be updated
+whenever the user wants to withdraw datum-less UTxOs (or update their public
+key).
+
+With a hardcoded 5-year period, if an account has been inactive for more than
+that, anyone will be free to:
+- Claim all the funds (i.e. datum-less UTxOs sitting at
+  user's `cardano-account` address)
+- Burn the NFTs and get ADA of account's UTxOs
+- De-register `account`'s staking script and claim its registration deposit
+
 ## User Experience
 
 ### Account Creation
