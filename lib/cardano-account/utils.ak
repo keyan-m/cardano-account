@@ -5,7 +5,9 @@ use aiken/hash.{Blake2b_224, Hash}
 use aiken/interval.{Finite, Interval, IntervalBound}
 use aiken/list
 use aiken/time.{PosixTime}
-use aiken/transaction.{Input, Output, OutputReference, ValidityRange}
+use aiken/transaction.{
+  InlineDatum, Input, Output, OutputReference, ValidityRange,
+}
 use aiken/transaction/credential.{Address, Script, ScriptCredential}
 use aiken/transaction/value.{AssetName, MintedValue, PolicyId, Value}
 use cardano_account/constants.{accounts_token_name_byte, entrys_token_name_byte}
@@ -91,6 +93,41 @@ pub fn get_own_input_at(
     list.at(inputs, input_index)
   expect (own_out_ref == spent_own_out_ref)?
   own_utxo
+}
+
+pub fn get_authentic_input_at(
+  reference_inputs: List<Input>,
+  address_script_hash: ScriptHash,
+  nft_policy: ScriptHash,
+  nft_token_name: ByteArray,
+  input_index: Int,
+) -> Input {
+  expect Some(
+    Input {
+      output: Output {
+        address: Address {
+          payment_credential: ScriptCredential(refs_script_hash),
+          ..
+        },
+        datum: InlineDatum(_),
+        value: refs_value,
+        ..
+      },
+      ..
+    } as found_ref_input,
+  ) = list.at(reference_inputs, input_index)
+
+  let (refs_nft_policy, refs_nft_token_name, refs_nft_qty) =
+    get_single_asset_from_value_apart_from_ada(refs_value)
+
+  expect and {
+      refs_script_hash == address_script_hash,
+      refs_nft_policy == nft_policy,
+      refs_nft_token_name == nft_token_name,
+      refs_nft_qty == 1,
+    }?
+
+  found_ref_input
 }
 
 pub fn get_single_script_input(inputs: List<Input>) -> Input {

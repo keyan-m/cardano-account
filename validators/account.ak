@@ -1,22 +1,15 @@
 // === IMPORTS =================================================================
 use aiken/bytearray
 use aiken/cbor
-use aiken/list
 use aiken/pairs
 use aiken/transaction.{
   InlineDatum, Input, Output, ScriptContext, Spend, Transaction, WithdrawFrom,
 }
 use aiken/transaction/credential.{Address, Inline, ScriptCredential}
 use aiken/transaction/value
-use cardano_account/constants.{
-  accounts_token_name_byte_value, entrys_token_name_byte_value,
-}
+use cardano_account/constants as constants
 use cardano_account/types.{Account, AccountDatum, NoDatum}
-use cardano_account/utils.{
-  ScriptHash, get_single_asset_from_value_apart_from_ada,
-  get_single_script_input, outputs_signed_by_ed25519_key,
-  resolve_output_reference,
-} as utils
+use cardano_account/utils.{ScriptHash} as utils
 
 // === DATATYPES ===============================================================
 type Intent {
@@ -27,7 +20,7 @@ type Intent {
 
 type AccountAction {
   Authorized { signature: ByteArray, intent: Intent }
-  OpenClaim { accounts_input_index: Int }
+  OpenClaim
 }
 
 type WithdrawAction {
@@ -40,23 +33,23 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
   fn spend(in_datum: AccountDatum, action: AccountAction, ctx: ScriptContext) {
     expect ScriptContext { transaction: tx, purpose: Spend(own_out_ref) } = ctx
 
-    let Transaction { inputs, outputs, mint, withdrawals, .. } = tx
+    let Transaction { inputs, outputs, mint, withdrawals, validity_range, .. } =
+      tx
 
-    when action is {
-      Authorized { signature, intent } ->
-        when in_datum is {
-          NoDatum -> {
-            let Output { address: own_address, .. } =
-              resolve_output_reference(inputs, own_out_ref)
+    when in_datum is {
+      NoDatum -> {
+        let Output { address: own_address, .. } =
+          utils.resolve_output_reference(inputs, own_out_ref)
 
-            let own_withdrawal = Inline(own_address.payment_credential)
+        let own_withdrawal = Inline(own_address.payment_credential)
 
-            // This transaction has to be witnessed by the reward withdrawal
-            // endpoint of this validator. This allows efficient batch spends.
-            pairs.has_key(withdrawals, own_withdrawal)
-          }
-
-          Account { pubkey, nonce: _, latest_activity: _ } -> {
+        // This transaction has to be witnessed by the reward withdrawal
+        // endpoint of this validator. This allows efficient batch spends.
+        pairs.has_key(withdrawals, own_withdrawal)
+      }
+      Account { pubkey, nonce, latest_activity: _ } -> {
+        when action is {
+          Authorized { signature, intent } -> {
             // For changing the stored public key, or deleting the account, only
             // 1 UTxO must be getting spent from a script address (i.e. this
             // script).
@@ -70,18 +63,19 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
                 ..
               },
               output_reference: own_out_ref,
-            } = get_single_script_input(inputs)
+            } = utils.get_single_script_input(inputs)
 
             let (accounts_policy, accounts_token_name, accounts_qty) =
-              get_single_asset_from_value_apart_from_ada(in_value)
+              utils.get_single_asset_from_value_apart_from_ada(in_value)
 
             let accounts_tn =
-              username |> bytearray.push(accounts_token_name_byte_value)
+              username
+                |> bytearray.push(constants.accounts_token_name_byte_value)
 
             // 1. Spent UTxO must be authentic
             // 2. Outputs must be signed by account owner
             expect and {
-                outputs_signed_by_ed25519_key(pubkey, outputs, signature),
+                utils.outputs_signed_by_ed25519_key(pubkey, outputs, signature),
                 accounts_policy == record_script_hash,
                 accounts_token_name == accounts_tn,
                 accounts_qty == 1,
@@ -119,17 +113,19 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
                   own_script_hash == out_script_hash,
                   in_value == out_value,
                   !(new_pubkey == pubkey),
-                  outputs_signed_by_ed25519_key(
+                  utils.outputs_signed_by_ed25519_key(
                     new_pubkey,
                     outputs,
                     signature_with_new_key,
                   ),
                   new_nonce == cbor.serialise(own_out_ref),
+                  new_latest_activity == utils.get_upper_bound(validity_range),
                 }?
               }
               DeleteAccount -> {
                 let entrys_tn =
-                  username |> bytearray.push(entrys_token_name_byte_value)
+                  username
+                    |> bytearray.push(constants.entrys_token_name_byte_value)
 
                 let expected_mint =
                   value.merge(
@@ -140,11 +136,48 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
 
                 (mint == expected_mint)?
               }
-              ProveActivity -> todo
+              ProveActivity -> {
+                expect [
+                  Output {
+                    address: Address {
+                      payment_credential: ScriptCredential(cont_script_hash),
+                      ..
+                    },
+                    datum: InlineDatum(cont_datum_data),
+                    value: cont_value,
+                    reference_script: None,
+                  },
+                  ..
+                ] = outputs
+                expect Account {
+                  pubkey: cont_pubkey,
+                  nonce: cont_nonce,
+                  latest_activity: cont_latest_activity,
+                } = cont_datum_data
+                and {
+                  utils.outputs_signed_by_ed25519_key(
+                    pubkey,
+                    outputs,
+                    signature,
+                  ),
+                  cont_script_hash == own_script_hash,
+                  cont_pubkey == pubkey,
+                  cont_nonce == nonce,
+                  cont_latest_activity == utils.get_upper_bound(validity_range),
+                  cont_value == in_value,
+                }?
+              }
             }
           }
+          OpenClaim -> {
+            // Similar to `record`'s `DepleteAccount` endpoint, this only needs
+            // to make sure the minting endpoint is invoked with two NFTs burnt
+            // with own script hash.
+            let mint_qty = mint |> utils.get_two_mint_nfts_of(record_script_hash)
+            mint_qty == -1
+          }
         }
-      OpenClaim { accounts_input_index } -> todo
+      }
     }
   }
 
@@ -155,43 +188,44 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
       transaction: tx,
       purpose: WithdrawFrom(Inline(ScriptCredential(own_script_hash))),
     } = ctx
-    let Transaction { inputs, redeemers, .. } = tx
+
+    let Transaction { inputs, reference_inputs, redeemers, validity_range, .. } =
+      tx
     when withdraw_action is {
       VerifySpentAccount { accounts_input_index } -> {
-        expect Some(Input {
-          output: Output {
-            address: Address {
-              payment_credential: ScriptCredential(accounts_script_hash),
-              ..
-            },
-            datum: InlineDatum(_),
-            value: accounts_value,
-            ..
-          },
-          output_reference: accounts_output_reference,
-        }) = list.at(inputs, accounts_input_index)
+        let account_input =
+          utils.get_authentic_input_at(
+            inputs,
+            own_script_hash,
+            record_script_hash,
+            username |> bytearray.push(constants.accounts_token_name_byte_value),
+            accounts_input_index,
+          )
 
         // Spending of the account UTxO must be authorized.
         expect Some(accounts_redeemer_data) =
-          redeemers |> pairs.get_first(Spend(accounts_output_reference))
+          redeemers |> pairs.get_first(Spend(account_input.output_reference))
         expect Authorized { intent, .. } = accounts_redeemer_data
-        expect (intent == ProveActivity)?
-
-        let accounts_tn =
-          username |> bytearray.push(accounts_token_name_byte_value)
-
-        let (accounts_policy, accounts_token_name, accounts_qty) =
-          utils.get_single_asset_from_value_apart_from_ada(accounts_value)
-
-        and {
-          accounts_script_hash == own_script_hash,
-          accounts_policy == record_script_hash,
-          accounts_token_name == accounts_tn,
-          // TODO: Is this necessary?
-          accounts_qty == 1,
-        }?
+        (intent == ProveActivity)?
       }
-      VerifyStaleness { reference_input_index } -> todo
+      VerifyStaleness { reference_input_index } -> {
+        expect Input {
+          output: Output { datum: InlineDatum(accounts_datum_data), .. },
+          ..
+        } =
+          utils.get_authentic_input_at(
+            reference_inputs,
+            own_script_hash,
+            record_script_hash,
+            username |> bytearray.push(constants.accounts_token_name_byte_value),
+            reference_input_index,
+          )
+
+        // Recorded latest activity in account's datum must date back to at
+        // `constants.allowed_inactivity_period` milliseconds ago.
+        expect Account { latest_activity, .. } = accounts_datum_data
+        (utils.get_upper_bound(validity_range) - latest_activity > constants.allowed_inactivity_period)?
+      }
     }
   }
 }

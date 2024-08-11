@@ -441,7 +441,7 @@ validator(utxo_ref: OutputReference) {
       }
       DepleteAccount { input_index } -> {
         // This only needs to make sure the minting endpoint is invoked with two
-        // NFTs burnt with own script hash..
+        // NFTs burnt with own script hash.
 
         expect Output {
           address: Address {
