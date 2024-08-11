@@ -8,10 +8,7 @@ use aiken/transaction.{
 }
 use aiken/transaction/credential.{Address, ScriptCredential}
 use aiken/transaction/value
-use cardano_account/constants.{
-  accounts_token_name_byte, accounts_token_name_byte_value,
-  entrys_token_name_byte, entrys_token_name_byte_value,
-}
+use cardano_account/constants as constants
 use cardano_account/types.{Account, AccountDatum} as types
 use cardano_account/utils as utils
 
@@ -89,8 +86,9 @@ validator(utxo_ref: OutputReference) {
         // Requires the proper entry in the list to be spent so that its datum
         // correctly points to the new account's username. The proper entry is
         // a previously created entry such that:
-        // 1. Its own token name (i.e. `entrys_token_name_byte` + username) is
-        //    smaller than the new account's entry token name
+        // 1. Its own token name (i.e.
+        //    `constants.entrys_token_name_byte` + username) is smaller than the
+        //     new account's entry token name
         // 2. The account it (potentially) points to as its `next_username` has
         //    a username that is larger than the new account's
 
@@ -100,10 +98,10 @@ validator(utxo_ref: OutputReference) {
 
         // Exactly two assets must be minted for `username`.
         let (mint_username, mint_qty) =
-          utils.get_entry_and_account_mint_username_and_quantity_of(
-            mint,
-            own_policy,
-          )
+          mint
+            |> utils.get_entry_and_account_mint_username_and_quantity_of(
+                own_policy,
+              )
         expect and {
             mint_username == username,
             mint_qty == 1,
@@ -111,9 +109,9 @@ validator(utxo_ref: OutputReference) {
 
         // Minted tokens must have identical names apart from their first bytes.
         let entrys_token_name =
-          username |> bytearray.push(entrys_token_name_byte_value)
+          username |> bytearray.push(constants.entrys_token_name_byte_value)
         let accounts_token_name =
-          username |> bytearray.push(accounts_token_name_byte_value)
+          username |> bytearray.push(constants.accounts_token_name_byte_value)
 
         // Only 1 UTxO must be spent from the script address.
         expect [
@@ -359,9 +357,9 @@ validator(utxo_ref: OutputReference) {
             prev_entrys_policy == own_policy,
             entrys_policy == own_policy,
             accounts_policy == own_policy,
-            bytearray.take(prev_entrys_token_name, 1) == entrys_token_name_byte,
-            bytearray.take(entrys_token_name, 1) == entrys_token_name_byte,
-            bytearray.take(accounts_token_name, 1) == accounts_token_name_byte,
+            bytearray.take(prev_entrys_token_name, 1) == constants.entrys_token_name_byte,
+            bytearray.take(entrys_token_name, 1) == constants.entrys_token_name_byte,
+            bytearray.take(accounts_token_name, 1) == constants.accounts_token_name_byte,
             prev_entrys_qty == 1,
             entrys_qty == 1,
             accounts_qty == 1,
@@ -374,10 +372,24 @@ validator(utxo_ref: OutputReference) {
         expect (stored_closing_username == closing_username)?
         expect Entry { next_username: closing_entrys_next_username } =
           entrys_datum
-        expect Account { pubkey: accounts_pubkey, .. }: AccountDatum =
-          accounts_datum
         let prev_entrys_updated_datum: Data =
           Entry { next_username: closing_entrys_next_username }
+
+        // Exactly two assets must be burnt for `closing_username`.
+        let (burn_username, burn_qty) =
+          mint
+            |> utils.get_entry_and_account_mint_username_and_quantity_of(
+                own_policy,
+              )
+        expect and {
+            burn_username == closing_username,
+            burn_qty == -1,
+          }?
+
+        // An account must be considered stale to allow its removal.
+        expect Account { latest_activity, .. }: AccountDatum = accounts_datum
+        expect
+          (utils.get_upper_bound(validity_range) - latest_activity > constants.allowed_inactivity_period)?
 
         // First produced UTxO must go back to the script.
         expect [
@@ -393,30 +405,10 @@ validator(utxo_ref: OutputReference) {
           ..
         ] = outputs
 
-        // Exactly two assets must be burnt for `closing_username`.
-        expect [
-          (entrys_burn_policy, entrys_mint_name, -1),
-          (accounts_burn_policy, accounts_mint_name, -1),
-        ] =
-          mint
-            |> value.from_minted_value
-            |> value.flatten
-
-        let entrys_token_name =
-          closing_username |> bytearray.push(entrys_token_name_byte_value)
-
-        let accounts_token_name =
-          closing_username |> bytearray.push(accounts_token_name_byte_value)
-
+        // Previous entry in the list is reproduced unchanged, except for its
+        // datum, which must point to the closing entry's (potential) next
+        // username.
         and {
-          // Both burnt tokens belong to the closing username.
-          entrys_burn_policy == own_policy,
-          accounts_burn_policy == own_policy,
-          entrys_mint_name == entrys_token_name,
-          accounts_mint_name == accounts_token_name,
-          // Previous entry in the list is reproduced unchanged, except for its
-          // datum, which must point to the closing entry's (potential) next
-          // username.
           cont_prev_datum == prev_entrys_updated_datum,
           cont_prev_value == prev_value,
           cont_prev_script_hash == prev_entrys_script_hash,
@@ -432,33 +424,36 @@ validator(utxo_ref: OutputReference) {
 
     when action is {
       AppendToNewAccount { input_index } -> {
-        // This only needs to make sure the minting endpoint is invoked with a
-        // quantity of 1.
+        // This only needs to make sure the minting endpoint is invoked with two
+        // NFTs minted with own script hash..
 
         expect Output {
           address: Address {
-            payment_credential: ScriptCredential(own_script),
+            payment_credential: ScriptCredential(own_script_hash),
             ..
           },
           ..
         } = utils.get_own_input_at(inputs, own_out_ref, input_index)
 
-        let mint_quantity = utils.get_single_mint_quantity_of(mint, own_script)
-        mint_quantity == 1
+        let mint_qty = mint |> utils.get_two_mint_nfts_of(own_script_hash)
+
+        mint_qty == 1
       }
       DepleteAccount { input_index } -> {
-        // Only needs to ensure the burn endpoint is invoked.
+        // This only needs to make sure the minting endpoint is invoked with two
+        // NFTs burnt with own script hash..
 
         expect Output {
           address: Address {
-            payment_credential: ScriptCredential(own_script),
+            payment_credential: ScriptCredential(own_script_hash),
             ..
           },
           ..
         } = utils.get_own_input_at(inputs, own_out_ref, input_index)
 
-        let mint_quantity = utils.get_single_mint_quantity_of(mint, own_script)
-        mint_quantity == -1
+        let mint_qty = mint |> utils.get_two_mint_nfts_of(own_script_hash)
+
+        mint_qty == -1
       }
     }
   }

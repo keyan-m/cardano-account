@@ -36,6 +36,22 @@ pub fn get_single_mint_quantity_of(
   mint_quantity
 }
 
+pub fn get_two_mint_nfts_of(mint: MintedValue, script_hash: ScriptHash) -> Int {
+  expect [(mint_policy_0, _, mint_qty_0), (mint_policy_1, _, mint_qty_1)] =
+    mint
+      |> value.from_minted_value
+      |> value.flatten
+
+  // Exactly two NFTs must be minted with the same script hash.
+  expect and {
+      mint_policy_0 == script_hash,
+      mint_policy_1 == script_hash,
+      mint_qty_0 == mint_qty_1,
+    }?
+
+  mint_qty_0
+}
+
 // Validates only 2 tokens are minted/burnt such that:
 // 1. Both have the same policy as `target_policy`
 // 2. First one has an "entry label"
