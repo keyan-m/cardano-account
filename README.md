@@ -5,6 +5,8 @@
 * [Cardano Account: A Wallet-less Solution](#cardano-account-a-wallet-less-solution)
     * [How does it work?](#how-does-it-work)
     * [Technical Details](#technical-details)
+        * [Account Contract](#account-contract)
+        * [Record Contract](#record-contract)
         * [Support for Open Claim of Stale Accounts](#support-for-open-claim-of-stale-accounts)
     * [User Experience](#user-experience)
         * [Account Creation](#account-creation)
@@ -48,19 +50,40 @@ experienced users.
 
 ## Technical Details
 
+### Account Contract
+
 The `account` contract relies on the `record` contract, where all registered
 accounts are stored in order to guarantee uniqueness of usernames.
 
-`account` works by requiring its info UTxO to be provided as reference, so that
-its "reward withdrawal" endpoint can verify the signature once, and allow
-multiple datum-less UTxOs to be spent with minimal execution budgets.
+`account` works by requiring its info UTxO to be spent, so that its latest
+activity field can be
+updated (see [Support for Open Claim of Stale Accounts](#support-for-open-claim-of-stale-accounts)). To
+allow multiple datum-less UTxOs to be spent with minimal execution budgets, this
+contract also supports reward withdrawals that, depending on whether the account
+is considered stale or not, will either look for the account UTxO in the inputs,
+or simply as a reference input.
 
-The "info UTxO" is authenticated by an NFT from the `record` validator, and a
-token name identical to the `username` parameter of the contract, prefixed with
-a single byte to distinguish it from the NFT stored in the linked list.
+The "account UTxO" (meaning the UTxO carrying account's info), is authenticated
+by an NFT from the `record` validator, and a token name identical to
+the `username` parameter of the contract, prefixed with a single byte to
+distinguish it from the NFT stored in the linked list.
 
-The datum carries user's ED25519 public key, along with the nonce that was
-presumably used to generate the key pair.
+Information stored in account UTxO's datum consist of:
+- User's ED25519 public key
+- The nonce that was presumably used to generate the key pair
+- Account's latest activity in POSIX milliseconds
+```rs
+type Account {
+  pubkey: ByteArray,
+  nonce: ByteArray,
+  latest_activity: PosixTime,
+}
+```
+
+### Record Contract
+
+The purpose of this contract is to provide beacon NFTs for UTxOs, and also to
+keep track of registered usernames using a linked list to ensure uniqueness.
 
 ### Support for Open Claim of Stale Accounts
 
@@ -74,6 +97,10 @@ that, anyone will be free to:
   user's `cardano-account` address)
 - Burn the NFTs and get ADA of account's UTxOs
 - De-register `account`'s staking script and claim its registration deposit
+
+Note that currently there is no prevention of claiming the account UTxO before
+claiming all funds in the contract. If NFTs are burnt first, remaining funds
+will be locked permanently.
 
 ## User Experience
 
@@ -122,3 +149,6 @@ share it with others.
 
 In its current form, this is primarily intended as a proof of concept and not
 meant to be used in production.
+
+Plutus V3 is also not yet supported, and handling of datum-less UTxOs is
+emulated by defining `AccountDatum` as a sum type.
