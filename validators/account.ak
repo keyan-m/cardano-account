@@ -3,8 +3,9 @@ use aiken/bytearray
 use aiken/cbor
 use aiken/pairs
 use aiken/transaction.{
-  InlineDatum, Input, Output, ScriptContext, Spend, Transaction, WithdrawFrom,
+  InlineDatum, Input, Output, Publish, ScriptContext, Spend, Transaction, WithdrawFrom,
 }
+use aiken/transaction/certificate.{CredentialDeregistration}
 use aiken/transaction/credential.{Address, Inline, ScriptCredential}
 use aiken/transaction/value
 use cardano_account/constants as constants
@@ -184,16 +185,13 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
   // Verifies the authentic account UTxO is being spent, and that the outputs of
   // the transaction are signed by the stored ED25519 public key.
   fn withdraw(withdraw_action: WithdrawAction, ctx: ScriptContext) {
-    // TODO: Support de-registration of stale accounts.
-    expect ScriptContext {
-      transaction: tx,
-      purpose: WithdrawFrom(Inline(ScriptCredential(own_script_hash))),
-    } = ctx
+    let ScriptContext { transaction: tx, purpose } = ctx
 
     let Transaction { inputs, reference_inputs, redeemers, validity_range, .. } =
       tx
     when withdraw_action is {
       VerifySpentAccount { accounts_input_index } -> {
+        expect WithdrawFrom(Inline(ScriptCredential(own_script_hash))) = purpose
         let account_input =
           utils.get_authentic_input_at(
             inputs,
@@ -210,6 +208,13 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
         (intent == ProveActivity)?
       }
       VerifyStaleness { reference_input_index } -> {
+        let own_script_hash = {
+          when purpose is {
+            WithdrawFrom(Inline(ScriptCredential(script_hash))) -> script_hash
+            Publish(CredentialDeregistration(Inline(ScriptCredential(script_hash)))) -> script_hash
+            _ -> fail @"Unexpected script purpose"
+          }
+        }
         expect Input {
           output: Output { datum: InlineDatum(accounts_datum_data), .. },
           ..
