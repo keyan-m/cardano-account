@@ -5,6 +5,7 @@
 * [Cardano Account: A Wallet-less Solution](#cardano-account-a-wallet-less-solution)
     * [How does it work?](#how-does-it-work)
     * [Technical Details](#technical-details)
+        * [Support for Open Claim of Stale Accounts](#support-for-open-claim-of-stale-accounts)
     * [User Experience](#user-experience)
         * [Account Creation](#account-creation)
         * [Deposits](#deposits)
