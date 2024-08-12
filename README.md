@@ -19,8 +19,8 @@
 # Cardano Account: A Wallet-less Solution
 
 An alternate solution to Cardano wallets for simplifying the adoption by
-allowing users to take custody of their ADA with a username and password—similar
-to web2 conventions.
+allowing users to take custody of their Cardano funds with a username and
+password—similar to web2 conventions.
 
 ## How does it work?
 
