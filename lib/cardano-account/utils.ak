@@ -8,9 +8,14 @@ use aiken/time.{PosixTime}
 use aiken/transaction.{
   InlineDatum, Input, Output, OutputReference, ValidityRange,
 }
-use aiken/transaction/credential.{Address, Script, ScriptCredential}
+use aiken/transaction/credential.{
+  Address, Script, ScriptCredential, VerificationKey,
+}
 use aiken/transaction/value.{AssetName, MintedValue, PolicyId, Value}
 use cardano_account/constants.{accounts_token_name_byte, entrys_token_name_byte}
+
+pub type PubKeyHash =
+  Hash<Blake2b_224, VerificationKey>
 
 pub type ScriptHash =
   Hash<Blake2b_224, Script>
@@ -180,4 +185,29 @@ pub fn outputs_signed_by_ed25519_key(
     cbor.serialise(outputs),
     signature,
   )
+}
+
+pub fn account_is_stale(
+  latest_activity: PosixTime,
+  accounts_contributor: PubKeyHash,
+  extra_signatories: List<PubKeyHash>,
+  validity_range: ValidityRange,
+) -> Bool {
+  // An account must be considered stale to allow its removal. There is a 2-tier
+  // staleness.
+  //
+  // The contributor who had provided the initial funds for creating the account
+  // has the right to claim all the funds earlier than public.
+  //
+  // Therefore if contributor's signature is present, the shorter allowed
+  // inactivity is used to validate staleness.
+  let allowed_inactivity_period =
+    if list.has(extra_signatories, accounts_contributor) {
+      constants.allowed_inactivity_period_before_contributor_can_claim
+    } else {
+      constants.allowed_inactivity_period_before_open_claim
+    }
+  let elapsed_since_inactivity =
+    get_upper_bound(validity_range) - latest_activity
+  elapsed_since_inactivity > allowed_inactivity_period
 }

@@ -6,17 +6,15 @@ use aiken/transaction.{
   InlineDatum, Input, Mint, Output, OutputReference, ScriptContext, Spend,
   Transaction,
 }
-use aiken/transaction/credential.{Address, ScriptCredential}
+use aiken/transaction/credential.{
+  Address, ScriptCredential, VerificationKeyCredential,
+}
 use aiken/transaction/value
 use cardano_account/constants as constants
-use cardano_account/types.{Account, AccountDatum} as types
+use cardano_account/types.{Account, AccountDatum, Entry} as types
 use cardano_account/utils as utils
 
 // === DATATYPES ===============================================================
-type Entry {
-  next_username: Option<ByteArray>,
-}
-
 type MintAction {
   InitiateRecord
   MintNewAccount { username: ByteArray, signature: ByteArray }
@@ -36,14 +34,22 @@ validator(utxo_ref: OutputReference) {
   fn mint(action: MintAction, ctx: ScriptContext) {
     expect ScriptContext { transaction: tx, purpose: Mint(own_policy) } = ctx
 
-    let Transaction { inputs, outputs, mint, validity_range, .. } = tx
+    let Transaction {
+      extra_signatories,
+      inputs,
+      outputs,
+      mint,
+      validity_range,
+      ..
+    } = tx
 
     when action is {
       InitiateRecord -> {
         // Initial endpoint for starting the linked list. Requirements are:
         // 1. Specified UTxO must be getting spent
         // 2. A single, nameless NFT is minted at the script address
-        // 3. Output datum is `Entry { next_username: None }`
+        // 3. Output datum is `Entry { next_username: None, contributor }`,
+        //    where the contributor can be set arbitrarily
 
         // To enforce a single initiation, the specified UTxO must be spent.
         expect
@@ -73,7 +79,7 @@ validator(utxo_ref: OutputReference) {
         expect (own_script_hash == own_policy)?
 
         // Linked list must be empty at initiation.
-        expect Entry { next_username: None } = list_head_datum
+        expect Entry { next_username: None, .. } = list_head_datum
 
         // List head UTxO must contain only one other asset apart from ADA.
         let list_head_asset =
@@ -143,8 +149,13 @@ validator(utxo_ref: OutputReference) {
             bytearray.compare(curr_asset_tn, entrys_token_name) == Less,
           }?
 
-        expect Entry { next_username } = prev_entry_data
-        let updated_datum = Entry { next_username: Some(username) }
+        expect Entry { next_username, contributor: prev_entrys_contributor } =
+          prev_entry_data
+        let updated_datum =
+          Entry {
+            next_username: Some(username),
+            contributor: prev_entrys_contributor,
+          }
 
         // New username must be smaller than a potential next user. Note that
         // only usernames are compared.
@@ -177,7 +188,7 @@ validator(utxo_ref: OutputReference) {
               ..
             },
             value: o1_value,
-            datum: o1_datum,
+            datum: InlineDatum(o1_datum_data),
             reference_script: None,
           },
           Output {
@@ -191,8 +202,8 @@ validator(utxo_ref: OutputReference) {
           },
           ..
         ] = outputs
+        expect Entry { next_username: entrys_next_username, .. } = o1_datum_data
 
-        let entrys_datum = Entry { next_username }
         let (entrys_asset_policy, entrys_asset_name, entrys_asset_quantity) =
           utils.get_single_asset_from_value_apart_from_ada(o1_value)
 
@@ -215,7 +226,7 @@ validator(utxo_ref: OutputReference) {
           // smart contract.
           !(o2_pay_cred_hash == own_policy),
           o0_datum == InlineDatum(updated_datum),
-          o1_datum == InlineDatum(entrys_datum),
+          entrys_next_username == next_username,
           specified_nonce == cbor.serialise(own_out_ref),
           specified_latest_activity == utils.get_upper_bound(validity_range),
           utils.outputs_signed_by_ed25519_key(
@@ -368,12 +379,25 @@ validator(utxo_ref: OutputReference) {
         // Usernames and token names must match properly.
         let closing_username = bytearray.drop(accounts_token_name, 1)
         expect (bytearray.drop(entrys_token_name, 1) == closing_username)?
-        expect Entry{next_username: Some(stored_closing_username)} = prev_datum
+        expect Entry {
+          next_username: Some(stored_closing_username),
+          contributor: prev_entrys_contributor,
+        } = prev_datum
         expect (stored_closing_username == closing_username)?
-        expect Entry { next_username: closing_entrys_next_username } =
-          entrys_datum
+        expect Entry {
+          next_username: closing_entrys_next_username,
+          contributor: Address {
+            payment_credential: VerificationKeyCredential(
+              closing_entrys_contributor,
+            ),
+            ..
+          },
+        }: Entry = entrys_datum
         let prev_entrys_updated_datum: Data =
-          Entry { next_username: closing_entrys_next_username }
+          Entry {
+            next_username: closing_entrys_next_username,
+            contributor: prev_entrys_contributor,
+          }
 
         // Exactly two assets must be burnt for `closing_username`.
         let (burn_username, burn_qty) =
@@ -386,10 +410,15 @@ validator(utxo_ref: OutputReference) {
             burn_qty == -1,
           }?
 
-        // An account must be considered stale to allow its removal.
+        // Closing account must be considered stale.
         expect Account { latest_activity, .. }: AccountDatum = accounts_datum
         expect
-          (utils.get_upper_bound(validity_range) - latest_activity > constants.allowed_inactivity_period)?
+          utils.account_is_stale(
+            latest_activity,
+            closing_entrys_contributor,
+            extra_signatories,
+            validity_range,
+          )?
 
         // First produced UTxO must go back to the script.
         expect [

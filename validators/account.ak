@@ -3,13 +3,16 @@ use aiken/bytearray
 use aiken/cbor
 use aiken/pairs
 use aiken/transaction.{
-  InlineDatum, Input, Output, Publish, ScriptContext, Spend, Transaction, WithdrawFrom,
+  InlineDatum, Input, Output, Publish, ScriptContext, Spend, Transaction,
+  WithdrawFrom,
 }
 use aiken/transaction/certificate.{CredentialDeregistration}
-use aiken/transaction/credential.{Address, Inline, ScriptCredential}
+use aiken/transaction/credential.{
+  Address, Inline, ScriptCredential, VerificationKeyCredential,
+}
 use aiken/transaction/value
 use cardano_account/constants as constants
-use cardano_account/types.{Account, AccountDatum, NoDatum}
+use cardano_account/types.{Account, AccountDatum, Entry, NoDatum}
 use cardano_account/utils.{ScriptHash} as utils
 
 // === DATATYPES ===============================================================
@@ -26,7 +29,10 @@ type AccountAction {
 
 type WithdrawAction {
   VerifySpentAccount { accounts_input_index: Int }
-  VerifyStaleness { reference_input_index: Int }
+  VerifyStaleness {
+    accounts_reference_input_index: Int,
+    record_entrys_reference_input_index: Int,
+  }
 }
 
 // === THE VALIDATOR ===========================================================
@@ -48,7 +54,7 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
         // endpoint of this validator. This allows efficient batch spends.
         pairs.has_key(withdrawals, own_withdrawal)
       }
-      Account { pubkey, nonce, latest_activity: _ } -> {
+      Account { pubkey, nonce, latest_activity: _ } ->
         when action is {
           Authorized { signature, intent } -> {
             // For changing the stored public key, or deleting the account, only
@@ -174,11 +180,11 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
             // Similar to `record`'s `DepleteAccount` endpoint, this only needs
             // to make sure the minting endpoint is invoked with two NFTs burnt
             // with own script hash.
-            let mint_qty = mint |> utils.get_two_mint_nfts_of(record_script_hash)
+            let mint_qty =
+              mint |> utils.get_two_mint_nfts_of(record_script_hash)
             mint_qty == -1
           }
         }
-      }
     }
   }
 
@@ -187,8 +193,14 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
   fn withdraw(withdraw_action: WithdrawAction, ctx: ScriptContext) {
     let ScriptContext { transaction: tx, purpose } = ctx
 
-    let Transaction { inputs, reference_inputs, redeemers, validity_range, .. } =
-      tx
+    let Transaction {
+      extra_signatories,
+      inputs,
+      reference_inputs,
+      redeemers,
+      validity_range,
+      ..
+    } = tx
     when withdraw_action is {
       VerifySpentAccount { accounts_input_index } -> {
         expect WithdrawFrom(Inline(ScriptCredential(own_script_hash))) = purpose
@@ -207,14 +219,18 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
         expect Authorized { intent, .. } = accounts_redeemer_data
         (intent == ProveActivity)?
       }
-      VerifyStaleness { reference_input_index } -> {
-        let own_script_hash = {
+      VerifyStaleness {
+        accounts_reference_input_index,
+        record_entrys_reference_input_index,
+      } -> {
+        let own_script_hash =
           when purpose is {
             WithdrawFrom(Inline(ScriptCredential(script_hash))) -> script_hash
-            Publish(CredentialDeregistration(Inline(ScriptCredential(script_hash)))) -> script_hash
+            Publish(CredentialDeregistration(Inline(ScriptCredential(
+              script_hash,
+            )))) -> script_hash
             _ -> fail @"Unexpected script purpose"
           }
-        }
         expect Input {
           output: Output { datum: InlineDatum(accounts_datum_data), .. },
           ..
@@ -224,13 +240,37 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
             own_script_hash,
             record_script_hash,
             username |> bytearray.push(constants.accounts_token_name_byte_value),
-            reference_input_index,
+            accounts_reference_input_index,
+          )
+        expect Input {
+          output: Output { datum: InlineDatum(entrys_datum_data), .. },
+          ..
+        } =
+          utils.get_authentic_input_at(
+            reference_inputs,
+            record_script_hash,
+            record_script_hash,
+            username |> bytearray.push(constants.entrys_token_name_byte_value),
+            record_entrys_reference_input_index,
           )
 
-        // Recorded latest activity in account's datum must date back to at
-        // `constants.allowed_inactivity_period` milliseconds ago.
+        // Closing account must be considered stale.
         expect Account { latest_activity, .. } = accounts_datum_data
-        (utils.get_upper_bound(validity_range) - latest_activity > constants.allowed_inactivity_period)?
+        expect Entry {
+          contributor: Address {
+            payment_credential: VerificationKeyCredential(
+              closing_entrys_contributor,
+            ),
+            ..
+          },
+          ..
+        } = entrys_datum_data
+        utils.account_is_stale(
+          latest_activity,
+          closing_entrys_contributor,
+          extra_signatories,
+          validity_range,
+        )?
       }
     }
   }
