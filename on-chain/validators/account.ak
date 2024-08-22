@@ -1,18 +1,18 @@
 // === IMPORTS =================================================================
-use aiken/bytearray
+use aiken/primitive/bytearray
 use aiken/cbor
-use aiken/pairs
-use aiken/transaction.{
-  InlineDatum, Input, Output, Publish, ScriptContext, Spend, Transaction,
-  WithdrawFrom,
+use aiken/collection/pairs
+use cardano/transaction.{
+  InlineDatum, Input, Output, Publishing, ScriptContext, Spend, Spending, Transaction,
+  Withdrawing,
 }
-use aiken/transaction/certificate.{CredentialDeregistration}
-use aiken/transaction/credential.{
-  Address, Inline, ScriptCredential, VerificationKeyCredential,
+use cardano/certificate.{UnregisterCredential}
+use cardano/credential.{
+  Address, Script, VerificationKey,
 }
-use aiken/transaction/value
+use cardano/assets
 use cardano_account/constants as constants
-use cardano_account/types.{Account, AccountDatum, Entry, NoDatum}
+use cardano_account/types.{AccountDatum, Entry}
 use cardano_account/utils.{ScriptHash} as utils
 
 // === DATATYPES ===============================================================
@@ -37,24 +37,28 @@ type WithdrawAction {
 
 // === THE VALIDATOR ===========================================================
 validator(record_script_hash: ScriptHash, username: ByteArray) {
-  fn spend(in_datum: AccountDatum, action: AccountAction, ctx: ScriptContext) {
-    expect ScriptContext { transaction: tx, purpose: Spend(own_out_ref) } = ctx
+  fn spend(_: Data, __: Data, ctx: ScriptContext) {
+    let ScriptContext { transaction: tx, redeemer, info } = ctx
+
+    expect action: AccountAction = redeemer
 
     let Transaction { inputs, outputs, mint, withdrawals, validity_range, .. } =
       tx
+    // expect Spending(own_out_ref, Some(contributor_data)) = info
+    // expect ScriptContext { transaction: tx, purpose: Spend(own_out_ref) } = ctx
 
-    when in_datum is {
-      NoDatum -> {
+    when info is {
+      Spending(own_out_ref, None) -> {
         let Output { address: own_address, .. } =
           utils.resolve_output_reference(inputs, own_out_ref)
 
-        let own_withdrawal = Inline(own_address.payment_credential)
-
         // This transaction has to be witnessed by the reward withdrawal
         // endpoint of this validator. This allows efficient batch spends.
-        pairs.has_key(withdrawals, own_withdrawal)
+        pairs.has_key(withdrawals, own_address.payment_credential)
       }
-      Account { pubkey, nonce, latest_activity: _ } ->
+      Spending(own_out_ref, Some(in_datum_data)) -> {
+        expect AccountDatum { pubkey, nonce, latest_activity: _ } =
+          in_datum_data
         when action is {
           Authorized { signature, intent } -> {
             // For changing the stored public key, or deleting the account, only
@@ -63,7 +67,7 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
             expect Input {
               output: Output {
                 address: Address {
-                  payment_credential: ScriptCredential(own_script_hash),
+                  payment_credential: Script(own_script_hash),
                   ..
                 },
                 value: in_value,
@@ -93,7 +97,7 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
                 expect [
                   Output {
                     address: Address {
-                      payment_credential: ScriptCredential(out_script_hash),
+                      payment_credential: Script(out_script_hash),
                       ..
                     },
                     value: out_value,
@@ -103,7 +107,7 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
                   ..
                 ] = outputs
 
-                expect Account {
+                expect AccountDatum {
                   pubkey: new_pubkey,
                   nonce: new_nonce,
                   latest_activity: new_latest_activity,
@@ -135,11 +139,10 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
                     |> bytearray.push(constants.entrys_token_name_byte_value)
 
                 let expected_mint =
-                  value.merge(
-                    value.from_asset(record_script_hash, entrys_tn, -1),
-                    value.from_asset(record_script_hash, accounts_tn, -1),
+                  assets.merge(
+                    assets.from_asset(record_script_hash, entrys_tn, -1),
+                    assets.from_asset(record_script_hash, accounts_tn, -1),
                   )
-                    |> value.to_minted_value
 
                 (mint == expected_mint)?
               }
@@ -147,7 +150,7 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
                 expect [
                   Output {
                     address: Address {
-                      payment_credential: ScriptCredential(cont_script_hash),
+                      payment_credential: Script(cont_script_hash),
                       ..
                     },
                     datum: InlineDatum(cont_datum_data),
@@ -156,7 +159,7 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
                   },
                   ..
                 ] = outputs
-                expect Account {
+                expect AccountDatum {
                   pubkey: cont_pubkey,
                   nonce: cont_nonce,
                   latest_activity: cont_latest_activity,
@@ -185,13 +188,19 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
             mint_qty == -1
           }
         }
+      }
+      _ -> {
+        todo
+      }
     }
   }
 
   // Verifies the authentic account UTxO is being spent, and that the outputs of
   // the transaction are signed by the stored ED25519 public key.
-  fn withdraw(withdraw_action: WithdrawAction, ctx: ScriptContext) {
-    let ScriptContext { transaction: tx, purpose } = ctx
+  fn withdraw(_: Data, ctx: ScriptContext) {
+    let ScriptContext { transaction: tx, redeemer, info } = ctx
+
+    expect withdraw_action: WithdrawAction = redeemer
 
     let Transaction {
       extra_signatories,
@@ -203,7 +212,7 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
     } = tx
     when withdraw_action is {
       VerifySpentAccount { accounts_input_index } -> {
-        expect WithdrawFrom(Inline(ScriptCredential(own_script_hash))) = purpose
+        expect Withdrawing(Script(own_script_hash)) = info
         let account_input =
           utils.get_authentic_input_at(
             inputs,
@@ -224,12 +233,10 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
         record_entrys_reference_input_index,
       } -> {
         let own_script_hash =
-          when purpose is {
-            WithdrawFrom(Inline(ScriptCredential(script_hash))) -> script_hash
-            Publish(CredentialDeregistration(Inline(ScriptCredential(
-              script_hash,
-            )))) -> script_hash
-            _ -> fail @"Unexpected script purpose"
+          when info is {
+            Withdrawing(Script(script_hash)) -> script_hash
+            Publishing(_cert_index, UnregisterCredential(Script(script_hash), _)) -> script_hash
+            _ -> fail @"Unexpected script info"
           }
         expect Input {
           output: Output { datum: InlineDatum(accounts_datum_data), .. },
@@ -255,10 +262,10 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
           )
 
         // Closing account must be considered stale.
-        expect Account { latest_activity, .. } = accounts_datum_data
+        expect AccountDatum { latest_activity, .. } = accounts_datum_data
         expect Entry {
           contributor: Address {
-            payment_credential: VerificationKeyCredential(
+            payment_credential: VerificationKey(
               closing_entrys_contributor,
             ),
             ..

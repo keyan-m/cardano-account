@@ -3,7 +3,7 @@
 
 [[requirements]]
 name = "aiken-lang/stdlib"
-version = "1.9.0"
+version = "v2"
 source = "github"
 
 [[requirements]]
@@ -13,7 +13,7 @@ source = "github"
 
 [[packages]]
 name = "aiken-lang/stdlib"
-version = "1.9.0"
+version = "v2"
 requirements = []
 source = "github"
 
@@ -24,4 +24,5 @@ requirements = []
 source = "github"
 
 [etags]
-"aiken-lang/fuzz@v1" = [{ secs_since_epoch = 1724172857, nanos_since_epoch = 453261540 }, "64b978749e6060a0608706c12db5b430a27082ce344cff942500f269a0ecd7a5"]
+"aiken-lang/fuzz@v1" = [{ secs_since_epoch = 1724331302, nanos_since_epoch = 804087139 }, "64b978749e6060a0608706c12db5b430a27082ce344cff942500f269a0ecd7a5"]
+"aiken-lang/stdlib@v2" = [{ secs_since_epoch = 1724331302, nanos_since_epoch = 179988504 }, "cdbbce58b61deb385e7ea787a2e0fc2dc8fe94db9999e0e6275bc9c70e5796be"]

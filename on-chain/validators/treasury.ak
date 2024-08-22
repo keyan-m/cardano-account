@@ -1,8 +1,8 @@
-use aiken/list
-use aiken/transaction.{
-  InlineDatum, Input, Output, Redeemer, ScriptContext, Spend, Transaction,
+use aiken/collection/list
+use cardano/transaction.{
+  InlineDatum, Input, Output, ScriptContext, Spending, Transaction,
 }
-use aiken/transaction/credential.{Address, ScriptCredential}
+use cardano/credential.{Address, Script}
 use cardano_account/types.{Entry}
 use cardano_account/utils.{ScriptHash} as utils
 
@@ -11,13 +11,17 @@ type Contributor {
 }
 
 validator(record_script_hash: ScriptHash) {
-  fn spend(contributor: Contributor, _: Redeemer, ctx: ScriptContext) {
-    expect ScriptContext { transaction: tx, purpose: Spend(_) } = ctx
+  fn spend(_: Data, __: Data, ctx: ScriptContext) {
+    let ScriptContext { transaction: tx, redeemer: _, info } = ctx
+
+    expect Spending(_, Some(contributor_data)) = info
+
+    expect Contributor(contributors_address) = contributor_data
 
     let Transaction { inputs, outputs, mint, .. } = tx
 
-    let Address { stake_credential: contributors_stake_credential, .. } as contributors_address =
-      contributor.address
+    let Address { stake_credential: contributors_stake_credential, .. } =
+      contributors_address
 
     // Apart from UTxOs spent from `record` script, only one UTxO is expected to
     // be spent, which will be from this `treasury` contract.
@@ -25,7 +29,7 @@ validator(record_script_hash: ScriptHash) {
       list.filter(
         inputs,
         fn(i) {
-          !(i.output.address.payment_credential == ScriptCredential(
+          !(i.output.address.payment_credential == Script(
             record_script_hash,
           ))
         },

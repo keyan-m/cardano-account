@@ -1,9 +1,8 @@
-use aiken/time.{PosixTime}
-use aiken/transaction/credential.{Address}
+use cardano/transaction.{PosixTime}
+use cardano/credential.{Address}
 
 pub type AccountDatum {
-  NoDatum
-  Account { pubkey: ByteArray, nonce: ByteArray, latest_activity: PosixTime }
+  pubkey: ByteArray, nonce: ByteArray, latest_activity: PosixTime
 }
 
 pub type Entry {

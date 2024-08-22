@@ -1,17 +1,16 @@
 use aiken/builtin
-use aiken/bytearray
+use aiken/primitive/bytearray
 use aiken/cbor
 use aiken/hash.{Blake2b_224, Hash}
 use aiken/interval.{Finite, Interval, IntervalBound}
-use aiken/list
-use aiken/time.{PosixTime}
-use aiken/transaction.{
-  InlineDatum, Input, Output, OutputReference, ValidityRange,
+use aiken/collection/list
+use cardano/transaction.{
+  InlineDatum, Input, Output, OutputReference, PosixTime, ValidityRange,
 }
-use aiken/transaction/credential.{
-  Address, Script, ScriptCredential, VerificationKey,
+use cardano/credential.{
+  Address, Script, VerificationKey,
 }
-use aiken/transaction/value.{AssetName, MintedValue, PolicyId, Value}
+use cardano/assets.{AssetName, PolicyId, Value}
 use cardano_account/constants.{accounts_token_name_byte, entrys_token_name_byte}
 
 pub type PubKeyHash =
@@ -27,27 +26,25 @@ pub fn get_single_asset_from_value_apart_from_ada(
   // Exactly two assets are expected.
   expect [_, triplet] =
     v
-      |> value.flatten
+      |> assets.flatten
   triplet
 }
 
 pub fn get_single_mint_quantity_of(
-  mint: MintedValue,
+  mint: Value,
   target_policy: ScriptHash,
 ) -> Int {
   expect [(mint_policy, _, mint_quantity)] =
     mint
-      |> value.from_minted_value
-      |> value.flatten
+      |> assets.flatten
   expect (mint_policy == target_policy)?
   mint_quantity
 }
 
-pub fn get_two_mint_nfts_of(mint: MintedValue, script_hash: ScriptHash) -> Int {
+pub fn get_two_mint_nfts_of(mint: Value, script_hash: ScriptHash) -> Int {
   expect [(mint_policy_0, _, mint_qty_0), (mint_policy_1, _, mint_qty_1)] =
     mint
-      |> value.from_minted_value
-      |> value.flatten
+      |> assets.flatten
 
   // Exactly two NFTs must be minted with the same script hash.
   expect and {
@@ -67,7 +64,7 @@ pub fn get_two_mint_nfts_of(mint: MintedValue, script_hash: ScriptHash) -> Int {
 // 5. Quantities of both are equal
 // And returns the "username," along with the mint/burn quantity.
 pub fn get_entry_and_account_mint_username_and_quantity_of(
-  mint: MintedValue,
+  mint: Value,
   target_policy: ScriptHash,
 ) -> (ByteArray, Int) {
   expect [
@@ -75,8 +72,7 @@ pub fn get_entry_and_account_mint_username_and_quantity_of(
     (accounts_policy, accounts_mint_name, accounts_mint_qty),
   ] =
     mint
-      |> value.from_minted_value
-      |> value.flatten
+      |> assets.flatten
   let username = entrys_mint_name |> bytearray.drop(1)
   expect and {
       entrys_policy == target_policy,
@@ -111,7 +107,7 @@ pub fn get_authentic_input_at(
     Input {
       output: Output {
         address: Address {
-          payment_credential: ScriptCredential(refs_script_hash),
+          payment_credential: Script(refs_script_hash),
           ..
         },
         datum: InlineDatum(_),
@@ -145,7 +141,7 @@ pub fn get_single_script_input(inputs: List<Input>) -> Input {
           ..
         } = i
         when payment_credential is {
-          ScriptCredential(_) -> True
+          Script(_) -> True
           _ -> False
         }
       },
