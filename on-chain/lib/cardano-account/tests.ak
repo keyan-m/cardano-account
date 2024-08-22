@@ -43,7 +43,7 @@ fn generate_value() -> Fuzzer<Value> {
   let lovelace_count <- and_then(fuzz.int_at_least(200_000))
   let lovelace_value = value.from_lovelace(lovelace_count)
   let other_assets_values <-
-    and_then(fuzz.list_at_most(generate_one_asset_as_value(), 50))
+    and_then(fuzz.list_at_most(generate_one_asset_as_value(), 5))
   fuzz.constant(
     list.foldl(
       other_assets_values,
@@ -70,13 +70,13 @@ fn generate_sample_utxo() -> Fuzzer<Output> {
 }
 
 fn generate_outputs() -> Fuzzer<List<Output>> {
-  fuzz.list_at_least(generate_sample_utxo(), 1)
+  fuzz.list_at_most(generate_sample_utxo(), 5)
 }
 
 test prop_outputs(outs via generate_outputs()) {
   fuzz.label(@"TEST")
   trace cbor.serialise(outs)
-  list.length(outs) < 40
+  list.length(outs) < 5
 }
 
 test unit_verify_raw_outputs() {

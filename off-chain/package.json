@@ -1,0 +1,39 @@
+{
+  "name": "cardano-account",
+  "version": "0.1.0",
+  "description": "Off-chain component for cardano-account, an alternate solution to wallets with usernames and passwords.",
+  "main": "index.js",
+  "scripts": {
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/keyan-m/cardano-account.git"
+  },
+  "keywords": [
+    "cardano",
+    "account",
+    "walletless",
+    "onboarding",
+    "username",
+    "password",
+    "ed25519"
+  ],
+  "author": "keyan-m",
+  "bugs": {
+    "url": "https://github.com/keyan-m/cardano-account/issues"
+  },
+  "homepage": "https://github.com/keyan-m/cardano-account#readme",
+  "packageManager": "pnpm@9.0.4+sha1.b198ac6d38244fd829253720f9daafd6a606834d",
+  "devDependencies": {
+    "@types/node": "^22.4.1",
+    "tsup": "^8.2.4",
+    "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "@aiken-lang/merkle-patricia-forestry": "^1.1.0",
+    "@dcspark/cardano-multiplatform-lib-browser": "^5.3.1",
+    "@emurgo/cardano-serialization-lib-browser": "^11.5.0",
+    "@lucid-evolution/lucid": "^0.3.8"
+  }
+}
