@@ -2,15 +2,15 @@
 use aiken/primitive/bytearray
 use aiken/cbor
 use aiken/collection/pairs
-use cardano/transaction.{
-  InlineDatum, Input, Output, ScriptContext, Spend, Spending, Transaction,
-  Withdrawing,
-}
-use cardano/certificate.{UnregisterCredential}
+use cardano/assets
+use cardano/certificate.{Certificate, RegisterCredential, UnregisterCredential}
 use cardano/credential.{
   Address, Script, VerificationKey,
 }
-use cardano/assets
+use cardano/transaction.{
+  InlineDatum, Input, Output, ScriptContext, Spend, Spending, Transaction,
+  ValidityRange,
+}
 use cardano_account/constants as constants
 use cardano_account/types.{AccountDatum, Entry}
 use cardano_account/utils.{ScriptHash} as utils
@@ -18,7 +18,6 @@ use cardano_account/utils.{ScriptHash} as utils
 // === DATATYPES ===============================================================
 type Intent {
   UpdatePubkey { signature: ByteArray }
-  DeleteAccount
   ProveActivity
 }
 
@@ -27,8 +26,10 @@ type AccountAction {
   OpenClaim
 }
 
-type WithdrawAction {
-  VerifySpentAccount { accounts_input_index: Int }
+type ObserverAction {
+  VerifySpentAccount {
+    accounts_input_index: Int
+  }
   VerifyStaleness {
     accounts_reference_input_index: Int,
     record_entrys_reference_input_index: Int,
@@ -162,9 +163,11 @@ validator account(record_script_hash: ScriptHash, username: ByteArray) {
     }
   }
 
-  // Verifies the authentic account UTxO is being spent, and that the outputs of
-  // the transaction are signed by the stored ED25519 public key.
-  withdraw(withdraw_action: WithdrawAction, own_credential: Credential, ctx: ScriptContext) {
+  // Depending on the redeemer, it either validates account's authentication
+  // UTxO is spent (and subsequently the tx is signed by the stored ED25519
+  // key), or the account is stale and can be claimed (either by its original
+  // contributor, or enough time has passed that it's open for public claim).
+  withdraw(withdraw_action: ObserverAction, own_credential: Credential, tx: Transaction) {
     let Transaction {
       extra_signatories,
       inputs,
@@ -174,75 +177,142 @@ validator account(record_script_hash: ScriptHash, username: ByteArray) {
       ..
     } = tx
 
-    expect Script(own_script_hash) = own_credential
-
     when withdraw_action is {
       VerifySpentAccount { accounts_input_index } -> {
-        let account_input =
-          utils.get_authentic_input_at(
-            inputs,
-            own_script_hash,
-            record_script_hash,
-            username |> bytearray.push(constants.accounts_token_name_byte_value),
-            accounts_input_index,
-          )
-
-        // Spending of the account UTxO must be authorized.
-        expect Some(accounts_redeemer_data) =
-          redeemers |> pairs.get_first(Spend(account_input.output_reference))
-        expect Authorized { intent, .. } = accounts_redeemer_data
-        (intent == ProveActivity)?
+        verify_spent_account(
+          inputs,
+          redeemers,
+          own_credential,
+          record_script_hash,
+          username,
+          accounts_input_index,
+        )?
       }
-      VerifyStaleness {
-        accounts_reference_input_index,
-        record_entrys_reference_input_index,
-      } -> {
-        let own_script_hash =
-          when info is {
-            Publishing(_cert_index, UnregisterCredential(Script(script_hash), _)) -> script_hash
-            _ -> fail @"Unexpected script info"
-          }
-        expect Input {
-          output: Output { datum: InlineDatum(accounts_datum_data), .. },
-          ..
-        } =
-          utils.get_authentic_input_at(
-            reference_inputs,
-            own_script_hash,
-            record_script_hash,
-            username |> bytearray.push(constants.accounts_token_name_byte_value),
-            accounts_reference_input_index,
-          )
-        expect Input {
-          output: Output { datum: InlineDatum(entrys_datum_data), .. },
-          ..
-        } =
-          utils.get_authentic_input_at(
-            reference_inputs,
-            record_script_hash,
-            record_script_hash,
-            username |> bytearray.push(constants.entrys_token_name_byte_value),
-            record_entrys_reference_input_index,
-          )
-
-        // Closing account must be considered stale.
-        expect AccountDatum { latest_activity, .. } = accounts_datum_data
-        expect Entry {
-          contributor: Address {
-            payment_credential: VerificationKey(
-              closing_entrys_contributor,
-            ),
-            ..
-          },
-          ..
-        } = entrys_datum_data
-        utils.account_is_stale(
-          latest_activity,
-          closing_entrys_contributor,
+      VerifyStaleness {accounts_reference_input_index, record_entrys_reference_input_index} -> {
+        verify_staleness(
+          reference_inputs,
+          own_credential,
+          record_script_hash,
+          username,
           extra_signatories,
           validity_range,
+          accounts_reference_input_index,
+          record_entrys_reference_input_index
         )?
       }
     }
   }
+
+  // Allows credential registration freely, but for unregistration it'll need to
+  // verify the account is stale (by requiring both account's, and its entry's
+  // UTxOs present as references).
+  publish(publish_action: ObserverAction, certificate: Certificate, tx: Transaction) {
+    when certificate is {
+      RegisterCredential(_, __) -> True
+      UnregisterCredential(own_credential, _) -> {
+        let Transaction {
+          extra_signatories,
+          inputs,
+          reference_inputs,
+          redeemers,
+          validity_range,
+          ..
+        } = tx
+        expect VerifyStaleness {
+          accounts_reference_input_index,
+          record_entrys_reference_input_index,
+        } = publish_action
+        verify_staleness(
+          reference_inputs,
+          own_credential,
+          record_script_hash,
+          username,
+          extra_signatories,
+          validity_range,
+          accounts_reference_input_index,
+          record_entrys_reference_input_index
+        )?
+      }
+      _ -> False
+    }
+  }
+}
+
+
+fn verify_spent_account(
+  inputs: List<Input>,
+  redeemers: Pairs<ScriptPurpose, Redeemer>,
+  own_credential: Credential,
+  record_script_hash: ScriptHash,
+  username: ByteArray,
+  accounts_input_index: Int
+) {
+  expect Script(own_script_hash) = own_credential
+
+  let account_input =
+    utils.get_authentic_input_at(
+      inputs,
+      own_script_hash,
+      record_script_hash,
+      username |> bytearray.push(constants.accounts_token_name_byte_value),
+      accounts_input_index,
+    )
+
+  // Spending of the account UTxO must be authorized.
+  expect Some(accounts_redeemer_data) =
+    redeemers |> pairs.get_first(Spend(account_input.output_reference))
+  expect Authorized { intent, .. } = accounts_redeemer_data
+  (intent == ProveActivity)?
+}
+
+fn verify_staleness(
+  reference_inputs: List<Input>,
+  own_credential: Credential,
+  record_script_hash: ScriptHash,
+  username: ByteArray,
+  extra_signatories: List<PubKeyHash>,
+  validity_range: ValidityRange,
+  accounts_reference_input_index: Int,
+  record_entrys_reference_input_index: Int,
+) { expect Script(own_script_hash) = own_credential
+  expect Input {
+    output: Output { datum: InlineDatum(accounts_datum_data), .. },
+    ..
+  } =
+    utils.get_authentic_input_at(
+      reference_inputs,
+      own_script_hash,
+      record_script_hash,
+      username |> bytearray.push(constants.accounts_token_name_byte_value),
+      accounts_reference_input_index,
+    )
+  expect Input {
+    output: Output { datum: InlineDatum(entrys_datum_data), .. },
+    ..
+  } =
+    utils.get_authentic_input_at(
+      reference_inputs,
+      record_script_hash,
+      record_script_hash,
+      username |> bytearray.push(constants.entrys_token_name_byte_value),
+      record_entrys_reference_input_index,
+    )
+
+  // Closing account must be considered stale.
+  expect AccountDatum { latest_activity, .. } = accounts_datum_data
+  expect Entry {
+    contributor: Contributor {
+      payment_credential: VerificationKey(
+        closing_entrys_contributor,
+      ),
+      ..
+    },
+    ..
+  } = entrys_datum_data
+  utils.account_is_stale(
+    latest_activity,
+    closing_entrys_contributor,
+    extra_signatories,
+    validity_range,
+  )?
 }
