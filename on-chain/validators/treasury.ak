@@ -1,27 +1,18 @@
 use aiken/collection/list
 use cardano/transaction.{
-  InlineDatum, Input, Output, ScriptContext, Spending, Transaction,
+  InlineDatum, Input, Output, Spending, Transaction,
 }
-use cardano/credential.{Address, Script}
-use cardano_account/types.{Entry}
+use cardano/credential.{Address, Credential, Inline, Script}
+use cardano_account/types.{Contributor, Entry}
 use cardano_account/utils.{ScriptHash} as utils
 
-type Contributor {
-  address: Address,
-}
+validator treasury(record_script_hash: ScriptHash) {
+  spend(datum: Option<Contributor>, _: Data, tx: Transaction) {
+    expect Some(contributor) = datum
 
-validator(record_script_hash: ScriptHash) {
-  fn spend(_: Data, __: Data, ctx: ScriptContext) {
-    let ScriptContext { transaction: tx, redeemer: _, info } = ctx
-
-    expect Spending(_, Some(contributor_data)) = info
-
-    expect Contributor(contributors_address) = contributor_data
+    expect Contributor(_, contributors_stake_credential) = contributor
 
     let Transaction { inputs, outputs, mint, .. } = tx
-
-    let Address { stake_credential: contributors_stake_credential, .. } =
-      contributors_address
 
     // Apart from UTxOs spent from `record` script, only one UTxO is expected to
     // be spent, which will be from this `treasury` contract.
@@ -39,19 +30,19 @@ validator(record_script_hash: ScriptHash) {
 
     // Note that this ordering must remain in sync with `record`'s new account
     // minting endpoint.
-    // 1. Updated previous entry input ------> (this script)
-    // 2. New entry -------------------------> (this script)
+    // 1. Updated previous entry input ------> (record script)
+    // 2. New entry -------------------------> (record script)
     // 3. User's account UTxO ---------------> (outside)
     expect [
       _updated_previous_entrys_utxo,
       Output {
-        address: Address { stake_credential: new_entrys_stake_credential, .. },
+        address: Address { stake_credential: Some(Inline(new_entrys_stake_credential)), .. },
         datum: InlineDatum(new_entrys_datum_data),
         ..
       },
       Output {
         address: Address {
-          stake_credential: users_account_stake_credential,
+          stake_credential: Some(Inline(users_account_stake_credential)),
           ..
         },
         ..
@@ -67,8 +58,8 @@ validator(record_script_hash: ScriptHash) {
       // contributor's
       new_entrys_stake_credential == contributors_stake_credential,
       users_account_stake_credential == contributors_stake_credential,
-      // Contributor's address must be stored in record entry's datum
-      new_entrys_contributor == contributors_address,
+      // Contributor must be stored in record entry's datum
+      new_entrys_contributor == contributors,
     }?
   }
 }

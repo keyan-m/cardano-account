@@ -5,19 +5,19 @@ use aiken/hash.{Blake2b_224, Hash}
 use aiken/interval.{Finite, Interval, IntervalBound}
 use aiken/collection/list
 use cardano/transaction.{
-  InlineDatum, Input, Output, OutputReference, PosixTime, ValidityRange,
+  InlineDatum, Input, Output, OutputReference, ValidityRange,
 }
-use cardano/credential.{
-  Address, Script, VerificationKey,
+use cardano/address.{
+  Address, Credential, Script,
 }
 use cardano/assets.{AssetName, PolicyId, Value}
 use cardano_account/constants.{accounts_token_name_byte, entrys_token_name_byte}
 
 pub type PubKeyHash =
-  Hash<Blake2b_224, VerificationKey>
+  Hash<Blake2b_224, Credential>
 
 pub type ScriptHash =
-  Hash<Blake2b_224, Script>
+  Hash<Blake2b_224, Credential>
 
 // This functions assumes the "first" asset is ADA.
 pub fn get_single_asset_from_value_apart_from_ada(
@@ -149,7 +149,7 @@ pub fn get_single_script_input(inputs: List<Input>) -> Input {
   script_input
 }
 
-pub fn get_upper_bound(validity_range: ValidityRange) -> PosixTime {
+pub fn get_upper_bound(validity_range: ValidityRange) -> Int {
   expect Interval {
     upper_bound: IntervalBound { bound_type: Finite(upper_int), .. },
     ..
@@ -184,7 +184,7 @@ pub fn outputs_signed_by_ed25519_key(
 }
 
 pub fn account_is_stale(
-  latest_activity: PosixTime,
+  latest_activity: Int,
   accounts_contributor: PubKeyHash,
   extra_signatories: List<PubKeyHash>,
   validity_range: ValidityRange,

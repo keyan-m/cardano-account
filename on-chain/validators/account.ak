@@ -3,7 +3,7 @@ use aiken/primitive/bytearray
 use aiken/cbor
 use aiken/collection/pairs
 use cardano/transaction.{
-  InlineDatum, Input, Output, Publishing, ScriptContext, Spend, Spending, Transaction,
+  InlineDatum, Input, Output, ScriptContext, Spend, Spending, Transaction,
   Withdrawing,
 }
 use cardano/certificate.{UnregisterCredential}
@@ -36,19 +36,13 @@ type WithdrawAction {
 }
 
 // === THE VALIDATOR ===========================================================
-validator(record_script_hash: ScriptHash, username: ByteArray) {
-  fn spend(_: Data, __: Data, ctx: ScriptContext) {
-    let ScriptContext { transaction: tx, redeemer, info } = ctx
-
-    expect action: AccountAction = redeemer
-
+validator account(record_script_hash: ScriptHash, username: ByteArray) {
+  spend(datum: Option<Account>, action: AccountAction, own_out_ref: OutputReference, tx: Transaction) {
     let Transaction { inputs, outputs, mint, withdrawals, validity_range, .. } =
       tx
-    // expect Spending(own_out_ref, Some(contributor_data)) = info
-    // expect ScriptContext { transaction: tx, purpose: Spend(own_out_ref) } = ctx
 
-    when info is {
-      Spending(own_out_ref, None) -> {
+    when datum is {
+      None -> {
         let Output { address: own_address, .. } =
           utils.resolve_output_reference(inputs, own_out_ref)
 
@@ -56,7 +50,7 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
         // endpoint of this validator. This allows efficient batch spends.
         pairs.has_key(withdrawals, own_address.payment_credential)
       }
-      Spending(own_out_ref, Some(in_datum_data)) -> {
+      Some(in_datum_data) -> {
         expect AccountDatum { pubkey, nonce, latest_activity: _ } =
           in_datum_data
         when action is {
@@ -69,7 +63,7 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
                 address: Address {
                   payment_credential: Script(own_script_hash),
                   ..
-                },
+                } as own_address,
                 value: in_value,
                 ..
               },
@@ -96,10 +90,7 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
               UpdatePubkey { signature: signature_with_new_key } -> {
                 expect [
                   Output {
-                    address: Address {
-                      payment_credential: Script(out_script_hash),
-                      ..
-                    },
+                    address: out_address,
                     value: out_value,
                     datum: InlineDatum(out_datum_data),
                     reference_script: None,
@@ -121,7 +112,7 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
                 // 4. New nonce must be equal to output reference of the spent
                 //    UTxO
                 and {
-                  own_script_hash == out_script_hash,
+                  own_address == out_address,
                   in_value == out_value,
                   !(new_pubkey == pubkey),
                   utils.outputs_signed_by_ed25519_key(
@@ -133,26 +124,10 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
                   new_latest_activity == utils.get_upper_bound(validity_range),
                 }?
               }
-              DeleteAccount -> {
-                let entrys_tn =
-                  username
-                    |> bytearray.push(constants.entrys_token_name_byte_value)
-
-                let expected_mint =
-                  assets.merge(
-                    assets.from_asset(record_script_hash, entrys_tn, -1),
-                    assets.from_asset(record_script_hash, accounts_tn, -1),
-                  )
-
-                (mint == expected_mint)?
-              }
               ProveActivity -> {
                 expect [
                   Output {
-                    address: Address {
-                      payment_credential: Script(cont_script_hash),
-                      ..
-                    },
+                    address: cont_address,
                     datum: InlineDatum(cont_datum_data),
                     value: cont_value,
                     reference_script: None,
@@ -165,12 +140,7 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
                   latest_activity: cont_latest_activity,
                 } = cont_datum_data
                 and {
-                  utils.outputs_signed_by_ed25519_key(
-                    pubkey,
-                    outputs,
-                    signature,
-                  ),
-                  cont_script_hash == own_script_hash,
+                  cont_address == own_address,
                   cont_pubkey == pubkey,
                   cont_nonce == nonce,
                   cont_latest_activity == utils.get_upper_bound(validity_range),
@@ -189,19 +159,12 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
           }
         }
       }
-      _ -> {
-        todo
-      }
     }
   }
 
   // Verifies the authentic account UTxO is being spent, and that the outputs of
   // the transaction are signed by the stored ED25519 public key.
-  fn withdraw(_: Data, ctx: ScriptContext) {
-    let ScriptContext { transaction: tx, redeemer, info } = ctx
-
-    expect withdraw_action: WithdrawAction = redeemer
-
+  withdraw(withdraw_action: WithdrawAction, own_credential: Credential, ctx: ScriptContext) {
     let Transaction {
       extra_signatories,
       inputs,
@@ -210,9 +173,11 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
       validity_range,
       ..
     } = tx
+
+    expect Script(own_script_hash) = own_credential
+
     when withdraw_action is {
       VerifySpentAccount { accounts_input_index } -> {
-        expect Withdrawing(Script(own_script_hash)) = info
         let account_input =
           utils.get_authentic_input_at(
             inputs,
@@ -234,7 +199,6 @@ validator(record_script_hash: ScriptHash, username: ByteArray) {
       } -> {
         let own_script_hash =
           when info is {
-            Withdrawing(Script(script_hash)) -> script_hash
             Publishing(_cert_index, UnregisterCredential(Script(script_hash), _)) -> script_hash
             _ -> fail @"Unexpected script info"
           }
