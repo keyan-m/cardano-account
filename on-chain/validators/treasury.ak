@@ -1,21 +1,22 @@
 use aiken/collection/list
+use aiken/crypto.{ScriptHash}
+use cardano/address.{Address, Inline, Script}
 use cardano/transaction.{
-  InlineDatum, Input, Output, Spending, Transaction,
+  InlineDatum, Input, Output, OutputReference, Transaction,
 }
-use cardano/credential.{Address, Credential, Inline, Script}
 use cardano_account/types.{Contributor, Entry}
-use cardano_account/utils.{ScriptHash} as utils
+use cardano_account/utils as utils
 
 validator treasury(record_script_hash: ScriptHash) {
-  spend(datum: Option<Contributor>, _: Data, tx: Transaction) {
+  spend(datum: Option<Contributor>, _: Data, __: OutputReference, tx: Transaction) {
     expect Some(contributor) = datum
 
-    expect Contributor(_, contributors_stake_credential) = contributor
+    let Contributor(_, contributors_stake_credential) = contributor
 
     let Transaction { inputs, outputs, mint, .. } = tx
 
-    // Apart from UTxOs spent from `record` script, only one UTxO is expected to
-    // be spent, which will be from this `treasury` contract.
+    // Apart from UTxOs spent from `record` script, only one script UTxO is
+    // expected to be spent, which will be from this `treasury` contract.
     expect [_] =
       list.filter(
         inputs,
@@ -59,7 +60,7 @@ validator treasury(record_script_hash: ScriptHash) {
       new_entrys_stake_credential == contributors_stake_credential,
       users_account_stake_credential == contributors_stake_credential,
       // Contributor must be stored in record entry's datum
-      new_entrys_contributor == contributors,
+      new_entrys_contributor == contributor,
     }?
   }
 }

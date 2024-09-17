@@ -1,4 +1,4 @@
-use cardano/credential.{Credential}
+use cardano/address.{Credential}
 
 pub type AccountDatum {
   pubkey: ByteArray, nonce: ByteArray, latest_activity: Int

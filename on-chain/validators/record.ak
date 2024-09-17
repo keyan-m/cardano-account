@@ -2,14 +2,13 @@
 use aiken/primitive/bytearray
 use aiken/cbor
 use aiken/collection/list
-use cardano/transaction.{
-  InlineDatum, Input, Output, OutputReference, ScriptContext, Spending,
-  Transaction,
-}
-use cardano/credential.{
+use cardano/address.{
   Address, Script, VerificationKey,
 }
 use cardano/assets
+use cardano/transaction.{
+  InlineDatum, Input, Output, OutputReference, Transaction,
+}
 use cardano_account/constants as constants
 use cardano_account/types.{AccountDatum, Entry} as types
 use cardano_account/utils as utils
@@ -31,7 +30,7 @@ type SpendAction {
 
 // === THE VALIDATOR ===========================================================
 validator record(utxo_ref: OutputReference) {
-  mint(action: Data<MintAction>, tx: Transaction) {
+  mint(action: MintAction, tx: Transaction) {
     let Transaction {
       extra_signatories,
       inputs,
@@ -143,6 +142,10 @@ validator record(utxo_ref: OutputReference) {
         let (curr_asset_policy, curr_asset_tn, _) = curr_asset
         expect and {
             curr_asset_policy == own_policy,
+            or {
+              bytearray.take(curr_asset_tn, 1) == constants.entrys_token_name_byte,
+              curr_asset_tn == #"",
+            },
             bytearray.compare(curr_asset_tn, entrys_token_name) == Less,
           }?
 
@@ -166,9 +169,15 @@ validator record(utxo_ref: OutputReference) {
         // First 2 outputs are expected to be produced at the script address,
         // 3rd one has to be produced somewhere else (presumably user's
         // instantiation of the `account` script).
+        //
         // 1. Updated previous entry input ------> (this script)
         // 2. New entry -------------------------> (this script)
         // 3. User's account UTxO ---------------> (outside)
+        //
+        // Here we don't care about the staking parts. However, if the funds are
+        // being provided by the `treasury` contract, it'll stipulate that the
+        // staking parts of the new entry, and the UTxO going outside, belong to
+        // the contributor.
         expect [
           Output {
             address: Address {

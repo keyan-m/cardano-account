@@ -1,7 +1,7 @@
 use aiken/builtin
 use aiken/primitive/bytearray
 use aiken/cbor
-use aiken/hash.{Blake2b_224, Hash}
+use aiken/crypto.{Blake2b_224, Hash, ScriptHash}
 use aiken/interval.{Finite, Interval, IntervalBound}
 use aiken/collection/list
 use cardano/transaction.{
@@ -14,9 +14,6 @@ use cardano/assets.{AssetName, PolicyId, Value}
 use cardano_account/constants.{accounts_token_name_byte, entrys_token_name_byte}
 
 pub type PubKeyHash =
-  Hash<Blake2b_224, Credential>
-
-pub type ScriptHash =
   Hash<Blake2b_224, Credential>
 
 // This functions assumes the "first" asset is ADA.

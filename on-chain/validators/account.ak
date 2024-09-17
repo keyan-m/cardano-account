@@ -2,18 +2,18 @@
 use aiken/primitive/bytearray
 use aiken/cbor
 use aiken/collection/pairs
+use aiken/crypto.{ScriptHash}
+use cardano/address.{
+  Address, Credential, Script, VerificationKey,
+}
 use cardano/assets
 use cardano/certificate.{Certificate, RegisterCredential, UnregisterCredential}
-use cardano/credential.{
-  Address, Script, VerificationKey,
-}
 use cardano/transaction.{
-  InlineDatum, Input, Output, ScriptContext, Spend, Spending, Transaction,
-  ValidityRange,
+  InlineDatum, Input, Output, OutputReference, Spend, Transaction, ValidityRange,
 }
 use cardano_account/constants as constants
 use cardano_account/types.{AccountDatum, Entry}
-use cardano_account/utils.{ScriptHash} as utils
+use cardano_account/utils as utils
 
 // === DATATYPES ===============================================================
 type Intent {
@@ -38,7 +38,7 @@ type ObserverAction {
 
 // === THE VALIDATOR ===========================================================
 validator account(record_script_hash: ScriptHash, username: ByteArray) {
-  spend(datum: Option<Account>, action: AccountAction, own_out_ref: OutputReference, tx: Transaction) {
+  spend(datum: Option<AccountDatum>, action: AccountAction, own_out_ref: OutputReference, tx: Transaction) {
     let Transaction { inputs, outputs, mint, withdrawals, validity_range, .. } =
       tx
 
