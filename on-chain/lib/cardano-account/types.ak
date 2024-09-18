@@ -1,7 +1,9 @@
 use cardano/address.{Credential}
 
 pub type AccountDatum {
-  pubkey: ByteArray, nonce: ByteArray, latest_activity: Int
+  pubkey: ByteArray,
+  nonce: ByteArray,
+  latest_activity: Int,
 }
 
 pub type Contributor {

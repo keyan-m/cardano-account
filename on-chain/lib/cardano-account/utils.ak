@@ -1,26 +1,26 @@
 use aiken/builtin
-use aiken/primitive/bytearray
 use aiken/cbor
+use aiken/collection/list
 use aiken/crypto.{ScriptHash, VerificationKeyHash}
 use aiken/interval.{Finite, Interval, IntervalBound}
-use aiken/collection/list
-use cardano/address.{
-  Address, Credential, Script, VerificationKey,
-}
+use aiken/primitive/bytearray
+use cardano/address.{Address, Credential, Script, VerificationKey}
 use cardano/assets.{AssetName, PolicyId, Value}
 use cardano/transaction.{
   InlineDatum, Input, Output, OutputReference, ValidityRange,
 }
 use cardano_account/constants.{accounts_token_name_byte, entrys_token_name_byte}
 
-pub type PubKeyHash = VerificationKeyHash
+pub type PubKeyHash =
+  VerificationKeyHash
 
 // This functions assumes the "first" asset is ADA.
 pub fn get_single_asset_from_value_apart_from_ada(
   v: Value,
 ) -> (PolicyId, AssetName, Int) {
   // Exactly two assets are expected.
-  expect [_, triplet] =
+  expect [_,
+    triplet] =
     v
       |> assets.flatten
   triplet
@@ -38,7 +38,8 @@ pub fn get_single_mint_quantity_of(
 }
 
 pub fn get_two_mint_nfts_of(mint: Value, script_hash: ScriptHash) -> Int {
-  expect [(mint_policy_0, _, mint_qty_0), (mint_policy_1, _, mint_qty_1)] =
+  expect [(mint_policy_0, _, mint_qty_0),
+    (mint_policy_1, _, mint_qty_1)] =
     mint
       |> assets.flatten
 
@@ -102,10 +103,7 @@ pub fn get_authentic_input_at(
   expect Some(
     Input {
       output: Output {
-        address: Address {
-          payment_credential: Script(refs_script_hash),
-          ..
-        },
+        address: Address { payment_credential: Script(refs_script_hash), .. },
         datum: InlineDatum(_),
         value: refs_value,
         ..
@@ -197,13 +195,12 @@ pub fn account_is_stale(
   // inactivity is used to validate staleness.
   let allowed_inactivity_period =
     when accounts_contributor is {
-      VerificationKey(vkh) -> {
+      VerificationKey(vkh) ->
         if list.has(extra_signatories, vkh) {
           constants.allowed_inactivity_period_before_contributor_can_claim
         } else {
           constants.allowed_inactivity_period_before_open_claim
         }
-      }
       Script(_) -> constants.allowed_inactivity_period_before_open_claim
     }
   let elapsed_since_inactivity =

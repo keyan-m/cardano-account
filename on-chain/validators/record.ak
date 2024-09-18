@@ -1,20 +1,18 @@
-// === IMPORTS =================================================================
-use aiken/primitive/bytearray
 use aiken/cbor
 use aiken/collection/list
-use cardano/address.{
-  Address, Script, VerificationKey,
-}
-use cardano/assets
+// === IMPORTS =================================================================
+use aiken/primitive/bytearray
+use cardano/address.{Address, Script}
+use cardano/assets.{PolicyId, Value}
 use cardano/transaction.{
   InlineDatum, Input, Output, OutputReference, Transaction,
 }
 use cardano_account/constants as constants
-use cardano_account/types.{AccountDatum, Entry} as types
+use cardano_account/types.{AccountDatum, Contributor, Entry} as types
 use cardano_account/utils as utils
 
 // === DATATYPES ===============================================================
-type MintAction {
+pub type MintAction {
   InitiateRecord
   MintNewAccount { username: ByteArray, signature: ByteArray }
   CloseStaleAccount {
@@ -23,14 +21,14 @@ type MintAction {
   }
 }
 
-type SpendAction {
+pub type SpendAction {
   AppendToNewAccount { input_index: Int }
   DepleteAccount { input_index: Int }
 }
 
 // === THE VALIDATOR ===========================================================
 validator record(utxo_ref: OutputReference) {
-  mint(action: MintAction, tx: Transaction) {
+  mint(action: MintAction, own_policy: PolicyId, tx: Transaction) {
     let Transaction {
       extra_signatories,
       inputs,
@@ -64,10 +62,7 @@ validator record(utxo_ref: OutputReference) {
           Output {
             datum: InlineDatum(list_head_datum),
             value: list_head_value,
-            address: Address {
-              payment_credential: Script(own_script_hash),
-              ..
-            },
+            address: Address { payment_credential: Script(own_script_hash), .. },
             reference_script: None,
           },
           ..
@@ -129,11 +124,7 @@ validator record(utxo_ref: OutputReference) {
         ] =
           list.filter(
             inputs,
-            fn(i) {
-              i.output.address.payment_credential == Script(
-                own_policy,
-              )
-            },
+            fn(i) { i.output.address.payment_credential == Script(own_policy) },
           )
 
         // Only Ada and previous entry's NFT must be carried in the UTxO. Note
@@ -208,8 +199,11 @@ validator record(utxo_ref: OutputReference) {
         ] = outputs
 
         expect Entry { next_username: entrys_next_username, .. } = o1_datum_data
-        let (entrys_output_asset_policy, entrys_output_asset_name, entrys_output_asset_quantity) =
-          utils.get_single_asset_from_value_apart_from_ada(o1_value)
+        let (
+          entrys_output_asset_policy,
+          entrys_output_asset_name,
+          entrys_output_asset_quantity,
+        ) = utils.get_single_asset_from_value_apart_from_ada(o1_value)
 
         expect AccountDatum {
           pubkey: specified_pubkey,
@@ -287,7 +281,7 @@ validator record(utxo_ref: OutputReference) {
             address: Address {
               payment_credential: Script(prev_entrys_script_hash),
               ..
-            },
+            } as prev_entrys_address,
             datum: InlineDatum(prev_datum),
             value: prev_value,
             ..
@@ -342,7 +336,7 @@ validator record(utxo_ref: OutputReference) {
           } {
             (o2, o1, o0)
           } else {
-            fail @"Given out refs don't match with found inputs properly"
+            fail @"Given out refs don't match found inputs properly"
           }
 
         // Both entry UTxOs are expected to be coming from this script address,
@@ -386,7 +380,7 @@ validator record(utxo_ref: OutputReference) {
         expect (stored_closing_username == closing_username)?
         expect Entry {
           next_username: closing_entrys_next_username,
-          contributor: Address {
+          contributor: Contributor {
             payment_credential: closing_entrys_contributor,
             ..
           },
@@ -421,12 +415,9 @@ validator record(utxo_ref: OutputReference) {
         // First produced UTxO must go back to the script.
         expect [
           Output {
+            address: cont_prev_address,
             datum: InlineDatum(cont_prev_datum),
             value: cont_prev_value,
-            address: Address {
-              payment_credential: Script(cont_prev_script_hash),
-              ..
-            },
             reference_script: None,
           },
           ..
@@ -436,57 +427,54 @@ validator record(utxo_ref: OutputReference) {
         // datum, which must point to the closing entry's (potential) next
         // username.
         and {
+          cont_prev_address == prev_entrys_address,
           cont_prev_datum == prev_entrys_updated_datum,
           cont_prev_value == prev_value,
-          cont_prev_script_hash == prev_entrys_script_hash,
         }?
       }
     }
   }
 
-  spend(_: Data, __: Data, ctx: ScriptContext) {
-    expect ScriptContext { transaction: tx, redeemer, info: Spending(own_out_ref, Some(_)) } = ctx
-    expect action: SpendAction = redeemer
+  spend(
+    datum: Option<Entry>,
+    action: SpendAction,
+    own_out_ref: OutputReference,
+    tx: Transaction,
+  ) {
+    expect Some(_) = datum
 
     let Transaction { inputs, mint, .. } = tx
 
     when action is {
-      AppendToNewAccount { input_index } -> {
+      AppendToNewAccount { input_index } ->
         // This only needs to make sure the minting endpoint is invoked with two
-        // NFTs minted with own script hash..
-
-        expect Output {
-          address: Address {
-            payment_credential: Script(own_script_hash),
-            ..
-          },
-          ..
-        } = utils.get_own_input_at(inputs, own_out_ref, input_index)
-
-        let mint_qty = mint |> utils.get_two_mint_nfts_of(own_script_hash)
-
-        mint_qty == 1
-      }
-      DepleteAccount { input_index } -> {
+        // NFTs minted with own script hash.
+        validate_mint(input_index, 1, own_out_ref, inputs, mint)?
+      DepleteAccount { input_index } ->
         // This only needs to make sure the minting endpoint is invoked with two
-        // NFTs burnt with own script hash.
-
-        expect Output {
-          address: Address {
-            payment_credential: Script(own_script_hash),
-            ..
-          },
-          ..
-        } = utils.get_own_input_at(inputs, own_out_ref, input_index)
-
-        let mint_qty = mint |> utils.get_two_mint_nfts_of(own_script_hash)
-
-        mint_qty == -1
-      }
+        // NFTs minted with own script hash.
+        validate_mint(input_index, -1, own_out_ref, inputs, mint)?
     }
   }
 
-  else (_ctx: ScriptContext) {
-    todo
+  else(_) {
+    fail
   }
+}
+
+fn validate_mint(
+  input_index: Int,
+  expected_mint_quantity: Int,
+  own_out_ref: OutputReference,
+  inputs: List<Input>,
+  mint: Value,
+) -> Bool {
+  expect Output {
+    address: Address { payment_credential: Script(own_script_hash), .. },
+    ..
+  } = utils.get_own_input_at(inputs, own_out_ref, input_index)
+
+  let mint_qty = mint |> utils.get_two_mint_nfts_of(own_script_hash)
+
+  mint_qty == expected_mint_quantity
 }

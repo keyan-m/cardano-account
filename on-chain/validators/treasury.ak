@@ -8,7 +8,12 @@ use cardano_account/types.{Contributor, Entry}
 use cardano_account/utils as utils
 
 validator treasury(record_script_hash: ScriptHash) {
-  spend(datum: Option<Contributor>, _: Data, __: OutputReference, tx: Transaction) {
+  spend(
+    datum: Option<Contributor>,
+    _: Data,
+    __: OutputReference,
+    tx: Transaction,
+  ) {
     expect Some(contributor) = datum
 
     let Contributor(_, contributors_stake_credential) = contributor
@@ -21,9 +26,7 @@ validator treasury(record_script_hash: ScriptHash) {
       list.filter(
         inputs,
         fn(i) {
-          !(i.output.address.payment_credential == Script(
-            record_script_hash,
-          ))
+          !(i.output.address.payment_credential == Script(record_script_hash))
         },
       )
 
@@ -37,7 +40,10 @@ validator treasury(record_script_hash: ScriptHash) {
     expect [
       _updated_previous_entrys_utxo,
       Output {
-        address: Address { stake_credential: Some(Inline(new_entrys_stake_credential)), .. },
+        address: Address {
+          stake_credential: Some(Inline(new_entrys_stake_credential)),
+          ..
+        },
         datum: InlineDatum(new_entrys_datum_data),
         ..
       },
@@ -62,5 +68,9 @@ validator treasury(record_script_hash: ScriptHash) {
       // Contributor must be stored in record entry's datum
       new_entrys_contributor == contributor,
     }?
+  }
+
+  else(_) {
+    fail
   }
 }

@@ -1,11 +1,9 @@
-// === IMPORTS =================================================================
-use aiken/primitive/bytearray
 use aiken/cbor
 use aiken/collection/pairs
 use aiken/crypto.{ScriptHash}
-use cardano/address.{
-  Address, Credential, Script, VerificationKey,
-}
+// === IMPORTS =================================================================
+use aiken/primitive/bytearray
+use cardano/address.{Address, Credential, Script}
 use cardano/certificate.{Certificate, RegisterCredential, UnregisterCredential}
 use cardano/transaction.{
   InlineDatum, Input, Output, OutputReference, Redeemer, ScriptPurpose, Spend,
@@ -27,9 +25,7 @@ pub type AccountAction {
 }
 
 pub type ObserverAction {
-  VerifySpentAccount {
-    accounts_input_index: Int
-  }
+  VerifySpentAccount { accounts_input_index: Int }
   VerifyStaleness {
     accounts_reference_input_index: Int,
     record_entrys_reference_input_index: Int,
@@ -38,7 +34,12 @@ pub type ObserverAction {
 
 // === THE VALIDATOR ===========================================================
 validator account(record_script_hash: ScriptHash, username: ByteArray) {
-  spend(datum: Option<AccountDatum>, action: AccountAction, own_out_ref: OutputReference, tx: Transaction) {
+  spend(
+    datum: Option<AccountDatum>,
+    action: AccountAction,
+    own_out_ref: OutputReference,
+    tx: Transaction,
+  ) {
     let Transaction { inputs, outputs, mint, withdrawals, validity_range, .. } =
       tx
 
@@ -52,22 +53,14 @@ validator account(record_script_hash: ScriptHash, username: ByteArray) {
         pairs.has_key(withdrawals, own_address.payment_credential)
       }
       Some(in_datum_data) -> {
-        expect AccountDatum { pubkey, nonce, latest_activity: _ } =
-          in_datum_data
+        let AccountDatum { pubkey, nonce, latest_activity: _ } = in_datum_data
         when action is {
           Authorized { signature, intent } -> {
             // For changing the stored public key, or deleting the account, only
             // 1 UTxO must be getting spent from a script address (i.e. this
             // script).
-            expect Input {
-              output: Output {
-                address: Address {
-                  payment_credential: Script(own_script_hash),
-                  ..
-                } as own_address,
-                value: in_value,
-                ..
-              },
+            let Input {
+              output: Output { address: own_address, value: in_value, .. },
               output_reference: own_out_ref,
             } = utils.get_single_script_input(inputs)
 
@@ -167,7 +160,11 @@ validator account(record_script_hash: ScriptHash, username: ByteArray) {
   // UTxO is spent (and subsequently the tx is signed by the stored ED25519
   // key), or the account is stale and can be claimed (either by its original
   // contributor, or enough time has passed that it's open for public claim).
-  withdraw(withdraw_action: ObserverAction, own_credential: Credential, tx: Transaction) {
+  withdraw(
+    withdraw_action: ObserverAction,
+    own_credential: Credential,
+    tx: Transaction,
+  ) {
     let Transaction {
       extra_signatories,
       inputs,
@@ -178,7 +175,7 @@ validator account(record_script_hash: ScriptHash, username: ByteArray) {
     } = tx
 
     when withdraw_action is {
-      VerifySpentAccount { accounts_input_index } -> {
+      VerifySpentAccount { accounts_input_index } ->
         verify_spent_account(
           inputs,
           redeemers,
@@ -187,8 +184,10 @@ validator account(record_script_hash: ScriptHash, username: ByteArray) {
           username,
           accounts_input_index,
         )?
-      }
-      VerifyStaleness {accounts_reference_input_index, record_entrys_reference_input_index} -> {
+      VerifyStaleness {
+        accounts_reference_input_index,
+        record_entrys_reference_input_index,
+      } ->
         verify_staleness(
           reference_inputs,
           own_credential,
@@ -197,24 +196,25 @@ validator account(record_script_hash: ScriptHash, username: ByteArray) {
           extra_signatories,
           validity_range,
           accounts_reference_input_index,
-          record_entrys_reference_input_index
+          record_entrys_reference_input_index,
         )?
-      }
     }
   }
 
   // Allows credential registration freely, but for unregistration it'll need to
   // verify the account is stale (by requiring both account's, and its entry's
   // UTxOs present as references).
-  publish(publish_action: ObserverAction, certificate: Certificate, tx: Transaction) {
+  publish(
+    publish_action: ObserverAction,
+    certificate: Certificate,
+    tx: Transaction,
+  ) {
     when certificate is {
       RegisterCredential(_, __) -> True
       UnregisterCredential(own_credential, _) -> {
         let Transaction {
           extra_signatories,
-          inputs,
           reference_inputs,
-          redeemers,
           validity_range,
           ..
         } = tx
@@ -230,14 +230,17 @@ validator account(record_script_hash: ScriptHash, username: ByteArray) {
           extra_signatories,
           validity_range,
           accounts_reference_input_index,
-          record_entrys_reference_input_index
+          record_entrys_reference_input_index,
         )?
       }
       _ -> False
     }
   }
-}
 
+  else(_) {
+    fail
+  }
+}
 
 fn verify_spent_account(
   inputs: List<Input>,
@@ -245,7 +248,7 @@ fn verify_spent_account(
   own_credential: Credential,
   record_script_hash: ScriptHash,
   username: ByteArray,
-  accounts_input_index: Int
+  accounts_input_index: Int,
 ) {
   expect Script(own_script_hash) = own_credential
 
@@ -274,7 +277,8 @@ fn verify_staleness(
   validity_range: ValidityRange,
   accounts_reference_input_index: Int,
   record_entrys_reference_input_index: Int,
-) { expect Script(own_script_hash) = own_credential
+) {
+  expect Script(own_script_hash) = own_credential
   expect Input {
     output: Output { datum: InlineDatum(accounts_datum_data), .. },
     ..
@@ -302,9 +306,7 @@ fn verify_staleness(
   expect AccountDatum { latest_activity, .. } = accounts_datum_data
   expect Entry {
     contributor: Contributor {
-      payment_credential: VerificationKey(
-        closing_entrys_contributor,
-      ),
+      payment_credential: closing_entrys_contributor,
       ..
     },
     ..
