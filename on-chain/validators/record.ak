@@ -119,6 +119,7 @@ validator record(utxo_ref: OutputReference) {
         expect [
           Input {
             output: Output {
+              address: curr_address,
               datum: InlineDatum(prev_entry_data),
               value: curr_value,
               ..
@@ -180,10 +181,7 @@ validator record(utxo_ref: OutputReference) {
         // the contributor.
         expect [
           Output {
-            address: Address {
-              payment_credential: Script(o0_pay_cred_hash),
-              ..
-            },
+            address: o0_address,
             value: o0_value,
             datum: o0_datum,
             reference_script: None,
@@ -208,9 +206,9 @@ validator record(utxo_ref: OutputReference) {
           },
           ..
         ] = outputs
-        expect Entry { next_username: entrys_next_username, .. } = o1_datum_data
 
-        let (entrys_asset_policy, entrys_asset_name, entrys_asset_quantity) =
+        expect Entry { next_username: entrys_next_username, .. } = o1_datum_data
+        let (entrys_output_asset_policy, entrys_output_asset_name, entrys_output_asset_quantity) =
           utils.get_single_asset_from_value_apart_from_ada(o1_value)
 
         expect AccountDatum {
@@ -218,15 +216,14 @@ validator record(utxo_ref: OutputReference) {
           nonce: specified_nonce,
           latest_activity: specified_latest_activity,
         } = o2_datum_data
-
         let (
-          accounts_asset_policy,
-          accounts_asset_name,
-          accounts_asset_quantity,
+          accounts_output_asset_policy,
+          accounts_output_asset_name,
+          accounts_output_asset_quantity,
         ) = utils.get_single_asset_from_value_apart_from_ada(o2_value)
 
         and {
-          o0_pay_cred_hash == own_policy,
+          o0_address == curr_address,
           o1_pay_cred_hash == own_policy,
           // Account NFT is meant to be sent to the user-specific `account`
           // smart contract.
@@ -241,17 +238,18 @@ validator record(utxo_ref: OutputReference) {
             signature,
           ),
           o0_value == curr_value,
-          entrys_asset_policy == own_policy,
-          entrys_asset_name == entrys_token_name,
-          entrys_asset_quantity == 1,
-          accounts_asset_policy == own_policy,
-          accounts_asset_name == accounts_token_name,
-          accounts_asset_quantity == 1,
+          entrys_output_asset_policy == own_policy,
+          entrys_output_asset_name == entrys_token_name,
+          entrys_output_asset_quantity == 1,
+          accounts_output_asset_policy == own_policy,
+          accounts_output_asset_name == accounts_token_name,
+          accounts_output_asset_quantity == 1,
         }?
       }
       CloseStaleAccount { prev_entrys_out_ref, entrys_out_ref } -> {
-        // Accounts older than 5 years are up for grabs. This is meant as a
-        // measure to prevent permanent locking of funds.
+        // Accounts older than 6 years are up for grabs (it'll be 5 years for
+        // the contributor). This is meant as a measure to prevent permanent
+        // locking of funds.
         // 1. Three UTxOs are expected to be spent such that one of them points
         //    to the closing account's username, and the other two are closing
         //    account's entry and "info" UTxOs
@@ -271,14 +269,7 @@ validator record(utxo_ref: OutputReference) {
           list.filter(
             inputs,
             fn(i) {
-              let Input {
-                output: Output {
-                  address: Address { payment_credential, .. },
-                  ..
-                },
-                ..
-              } = i
-              when payment_credential is {
+              when i.output.address.payment_credential is {
                 Script(_) -> True
                 _ -> False
               }
@@ -374,7 +365,10 @@ validator record(utxo_ref: OutputReference) {
             prev_entrys_policy == own_policy,
             entrys_policy == own_policy,
             accounts_policy == own_policy,
-            bytearray.take(prev_entrys_token_name, 1) == constants.entrys_token_name_byte,
+            or {
+              bytearray.take(prev_entrys_token_name, 1) == constants.entrys_token_name_byte,
+              prev_entrys_token_name == #"",
+            },
             bytearray.take(entrys_token_name, 1) == constants.entrys_token_name_byte,
             bytearray.take(accounts_token_name, 1) == constants.accounts_token_name_byte,
             prev_entrys_qty == 1,
@@ -388,14 +382,12 @@ validator record(utxo_ref: OutputReference) {
         expect Entry {
           next_username: Some(stored_closing_username),
           contributor: prev_entrys_contributor,
-        } = prev_datum
+        }: Entry = prev_datum
         expect (stored_closing_username == closing_username)?
         expect Entry {
           next_username: closing_entrys_next_username,
           contributor: Address {
-            payment_credential: VerificationKey(
-              closing_entrys_contributor,
-            ),
+            payment_credential: closing_entrys_contributor,
             ..
           },
         }: Entry = entrys_datum

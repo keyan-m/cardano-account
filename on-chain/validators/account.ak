@@ -6,27 +6,27 @@ use aiken/crypto.{ScriptHash}
 use cardano/address.{
   Address, Credential, Script, VerificationKey,
 }
-use cardano/assets
 use cardano/certificate.{Certificate, RegisterCredential, UnregisterCredential}
 use cardano/transaction.{
-  InlineDatum, Input, Output, OutputReference, Spend, Transaction, ValidityRange,
+  InlineDatum, Input, Output, OutputReference, Redeemer, ScriptPurpose, Spend,
+  Transaction, ValidityRange,
 }
 use cardano_account/constants as constants
-use cardano_account/types.{AccountDatum, Entry}
-use cardano_account/utils as utils
+use cardano_account/types.{AccountDatum, Contributor, Entry}
+use cardano_account/utils.{PubKeyHash} as utils
 
 // === DATATYPES ===============================================================
-type Intent {
+pub type Intent {
   UpdatePubkey { signature: ByteArray }
   ProveActivity
 }
 
-type AccountAction {
+pub type AccountAction {
   Authorized { signature: ByteArray, intent: Intent }
   OpenClaim
 }
 
-type ObserverAction {
+pub type ObserverAction {
   VerifySpentAccount {
     accounts_input_index: Int
   }
@@ -308,7 +308,7 @@ fn verify_staleness(
       ..
     },
     ..
-  } = entrys_datum_data
+  }: Entry = entrys_datum_data
   utils.account_is_stale(
     latest_activity,
     closing_entrys_contributor,

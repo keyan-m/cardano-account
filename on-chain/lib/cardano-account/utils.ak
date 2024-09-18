@@ -1,20 +1,19 @@
 use aiken/builtin
 use aiken/primitive/bytearray
 use aiken/cbor
-use aiken/crypto.{Blake2b_224, Hash, ScriptHash}
+use aiken/crypto.{ScriptHash, VerificationKeyHash}
 use aiken/interval.{Finite, Interval, IntervalBound}
 use aiken/collection/list
+use cardano/address.{
+  Address, Credential, Script, VerificationKey,
+}
+use cardano/assets.{AssetName, PolicyId, Value}
 use cardano/transaction.{
   InlineDatum, Input, Output, OutputReference, ValidityRange,
 }
-use cardano/address.{
-  Address, Credential, Script,
-}
-use cardano/assets.{AssetName, PolicyId, Value}
 use cardano_account/constants.{accounts_token_name_byte, entrys_token_name_byte}
 
-pub type PubKeyHash =
-  Hash<Blake2b_224, Credential>
+pub type PubKeyHash = VerificationKeyHash
 
 // This functions assumes the "first" asset is ADA.
 pub fn get_single_asset_from_value_apart_from_ada(
@@ -182,23 +181,30 @@ pub fn outputs_signed_by_ed25519_key(
 
 pub fn account_is_stale(
   latest_activity: Int,
-  accounts_contributor: PubKeyHash,
-  extra_signatories: List<PubKeyHash>,
+  accounts_contributor: Credential,
+  extra_signatories: List<VerificationKeyHash>,
   validity_range: ValidityRange,
 ) -> Bool {
   // An account must be considered stale to allow its removal. There is a 2-tier
   // staleness.
   //
   // The contributor who had provided the initial funds for creating the account
-  // has the right to claim all the funds earlier than public.
+  // has the right to claim all the funds earlier than public (unless the 
+  // contributor was a script, validating a UTxO spent from its address would
+  // add too much complexity).
   //
   // Therefore if contributor's signature is present, the shorter allowed
   // inactivity is used to validate staleness.
   let allowed_inactivity_period =
-    if list.has(extra_signatories, accounts_contributor) {
-      constants.allowed_inactivity_period_before_contributor_can_claim
-    } else {
-      constants.allowed_inactivity_period_before_open_claim
+    when accounts_contributor is {
+      VerificationKey(vkh) -> {
+        if list.has(extra_signatories, vkh) {
+          constants.allowed_inactivity_period_before_contributor_can_claim
+        } else {
+          constants.allowed_inactivity_period_before_open_claim
+        }
+      }
+      Script(_) -> constants.allowed_inactivity_period_before_open_claim
     }
   let elapsed_since_inactivity =
     get_upper_bound(validity_range) - latest_activity
