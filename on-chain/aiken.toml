@@ -1,6 +1,6 @@
 name = "keyan-m/cardano-account"
 version = "0.0.0"
-compiler = "v1.1.1"
+compiler = "v1.1.2"
 plutus = "v3"
 license = "Apache-2.0"
 description = "A wallet-less Cardano solution with usernames and passwords for a more convenient onboarding"

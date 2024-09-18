@@ -11,10 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - uses: aiken-lang/setup-aiken@v0.1.0
+      - uses: aiken-lang/setup-aiken@v1.0.2
         with:
-          version: v1.0.31-alpha
+          version: v1.1.2
 
       - run: aiken fmt --check
+        working-directory: ./on-chain
       - run: aiken check -D
+        working-directory: ./on-chain
       - run: aiken build
+        working-directory: ./on-chain
