@@ -16,7 +16,7 @@ use cardano_account/utils as utils
 
 // === DATATYPES ===============================================================
 
-pub type SpendAction {
+pub type RecordSpendAction {
   AppendToNewAccount { input_index: Int }
   DepleteAccount { input_index: Int }
 }
@@ -472,8 +472,8 @@ validator record(utxo_ref: OutputReference) {
   }
 
   spend(
-    datum: Option<Entry>,
-    action: SpendAction,
+    datum: Option<RecordDatum>,
+    action: RecordSpendAction,
     own_out_ref: OutputReference,
     tx: Transaction,
   ) {
@@ -481,15 +481,13 @@ validator record(utxo_ref: OutputReference) {
 
     let Transaction { inputs, mint, .. } = tx
 
+    // Both endpoints only need to make sure the minting endpoint is invoked
+    // with a single asset of own script hash.
     when action is {
       AppendToNewAccount { input_index } ->
-        // This only needs to make sure the minting endpoint is invoked with two
-        // NFTs minted with own script hash.
-        validate_mint(input_index, 1, own_out_ref, inputs, mint)?
+        validate_mint(input_index, 3, own_out_ref, inputs, mint)?
       DepleteAccount { input_index } ->
-        // This only needs to make sure the minting endpoint is invoked with two
-        // NFTs minted with own script hash.
-        validate_mint(input_index, -1, own_out_ref, inputs, mint)?
+        validate_mint(input_index, -3, own_out_ref, inputs, mint)?
     }
   }
 
@@ -510,7 +508,10 @@ fn validate_mint(
     ..
   } = utils.get_own_input_at(inputs, own_out_ref, input_index)
 
-  let mint_qty = mint |> utils.get_two_mint_nfts_of(own_script_hash)
+  let [(mint_policy, _, mint_qty)] = assets.flatten(mint)
 
-  mint_qty == expected_mint_quantity
+  expect and {
+    mint_policy == own_script_hash,
+    mint_qty == expected_mint_quantity
+  }?
 }
