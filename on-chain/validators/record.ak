@@ -55,10 +55,7 @@ validator record(utxo_ref: OutputReference) {
 
         // Only a single, nameless token must be minted, with a quantity of 2,
         // 1 for the linked list head, and the other for the deployed script.
-        expect [mint_triplet] =
-          mint
-            |> assets.flatten
-        expect (_, mint_name, 2) = mint_triplet
+        expect [(_, mint_name, 2)] = assets.flatten(mint)
 
         // First 2 produced UTxOs must go to the script.
         expect [
@@ -127,9 +124,9 @@ validator record(utxo_ref: OutputReference) {
 
         // Exactly one asset must be minted for `username`, with a quantity of
         // three. No need to validate the minted asset's policy.
-        let [(_, mint_name, mint_qty)] = assets.flatten(mint)
+        expect [(_, mint_name, mint_qty)] = assets.flatten(mint)
         expect and {
-            mint_username == username,
+            mint_name == username,
             mint_qty == 3,
           }?
 
@@ -508,10 +505,7 @@ fn validate_mint(
     ..
   } = utils.get_own_input_at(inputs, own_out_ref, input_index)
 
-  let [(mint_policy, _, mint_qty)] = assets.flatten(mint)
+  let mint_qty = utils.get_single_mint_quantity_of(mint, own_script_hash)
 
-  expect and {
-    mint_policy == own_script_hash,
-    mint_qty == expected_mint_quantity
-  }?
+  expect (mint_qty == expected_mint_quantity)?
 }

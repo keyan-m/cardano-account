@@ -40,7 +40,7 @@ pub fn get_single_mint_quantity_of(
 pub fn get_single_mint_token_of(
   mint: Value,
   script_hash: ScriptHash
-) -> Pair<ByteArray, Int> {
+) -> (ByteArray, Int) {
   expect [(mint_policy, mint_name, mint_qty)] =
     mint
       |> assets.flatten
@@ -48,7 +48,7 @@ pub fn get_single_mint_token_of(
   // The single mint asset must match the expected policy.
   expect (mint_policy == script_hash)?
 
-  Pair(mint_name, mint_qty)
+  (mint_name, mint_qty)
 }
 
 // Validates only 2 tokens are minted/burnt such that:

@@ -1,5 +1,4 @@
 use cardano/address.{Credential}
-use cardano/transaction.{OutputReference}
 
 pub type Contributor {
   verification_key_hash: ByteArray,

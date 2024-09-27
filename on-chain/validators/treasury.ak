@@ -21,22 +21,18 @@ validator treasury(record_script_hash: ScriptHash) {
     expect Some(contributor) = datum
     let Contributor(_, contributors_stake_credential) = contributor
 
-    let Transaction { inputs, outputs, mint, redeemers, .. } = tx
+    let Transaction { inputs, outputs, mint, .. } = tx
 
-    // `record` contract's `MintNewAccount` must be the invoked endpoint.
-    let records_mint_purpose = Mint(record_script_hash)
-    let records_script = Script(record_script_hash)
-    expect Some(mint_redeemer) = pairs.get_first(redeemers, records_mint_purpose)
-    expect MintNewAccount(username, _): RecordMintAction = mint_redeemer
-    let Pair(mint_name, mint_qty) =
-      utils.get_single_mint_token_of(mint, record_script_hash)
-    expect and {
-      mint_name == username,
-      mint_qty == 3,
-    }?
+    // `record` contract's `MintNewAccount` must be the invoked endpoint. Note
+    // the mint quantity of 3 implies this (and therefore it must remain in
+    // sync!).
+    let mint_qty =
+      utils.get_single_mint_quantity_of(mint, record_script_hash)
+    expect (mint_qty == 3)?
 
     // Apart from UTxOs spent from `record` script, only one script UTxO is
     // expected to be spent, which will be from this `treasury` contract.
+    let records_script = Script(record_script_hash)
     expect [_] =
       list.filter(
         inputs,
@@ -50,7 +46,7 @@ validator treasury(record_script_hash: ScriptHash) {
     // 1. Updated previous entry input
     // 2. New entry
     // 3. User's account UTxO
-    // 4. User's deployed script
+    // 4. User's account reference script
     expect [
       _updated_previous_entrys_utxo,
       Output {
@@ -70,7 +66,7 @@ validator treasury(record_script_hash: ScriptHash) {
       },
       Output {
         address: Address {
-          stake_credential: Some(Inline(deployed_scripts_stake_credential)),
+          stake_credential: Some(Inline(ref_scripts_stake_credential)),
           ..
         },
         ..
@@ -84,7 +80,7 @@ validator treasury(record_script_hash: ScriptHash) {
       // contributor's
       new_entrys_stake_credential == contributors_stake_credential,
       users_account_stake_credential == contributors_stake_credential,
-      deployed_scripts_stake_credential == contributors_stake_credential,
+      ref_scripts_stake_credential == contributors_stake_credential,
       // Contributor must be stored in record entry's datum
       new_entrys_contributor == contributor,
     }?
