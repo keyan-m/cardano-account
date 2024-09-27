@@ -33,8 +33,11 @@ validator record(utxo_ref: OutputReference) {
       ..
     } = tx
 
+    let own_script = Script(own_policy)
+
     when action is {
       InitiateRecord -> {
+        // {{{
         // Initial endpoint for starting the linked list. Requirements are:
         // 1. Specified UTxO must be getting spent
         // 2. Exactly two nameless tokens are minted at the script address
@@ -105,8 +108,10 @@ validator record(utxo_ref: OutputReference) {
           records_ref_script_asset_name == mint_name,
           records_ref_script_asset_qty == 1,
         }?
+        // }}}
       }
       MintNewAccount { username, signature } -> {
+        // {{{
         // Requires the proper entry in the list to be spent so that its datum
         // correctly points to the new account's username. The proper entry is
         // a previously created entry such that:
@@ -122,13 +127,11 @@ validator record(utxo_ref: OutputReference) {
 
         // Exactly one asset must be minted for `username`, with a quantity of
         // three. No need to validate the minted asset's policy.
-        let [(_, mint_name, mint_qty)] = mint |> assets.flatten
+        let [(_, mint_name, mint_qty)] = assets.flatten(mint)
         expect and {
             mint_username == username,
             mint_qty == 3,
           }?
-
-        let own_script = Script(own_policy)
 
         // Only 1 UTxO must be spent from the script address.
         expect [
@@ -142,10 +145,7 @@ validator record(utxo_ref: OutputReference) {
             output_reference: own_out_ref,
           },
         ] =
-          list.filter(
-            inputs,
-            fn(i) { i.output.address.payment_credential == own_script },
-          )
+          utils.keep_only_inputs_from_credential(inputs, own_script)
 
         // Only Ada and previous entry's token must be carried in the UTxO.
         let prev_entrys_beacon =
@@ -284,144 +284,135 @@ validator record(utxo_ref: OutputReference) {
             signature,
           ),
         }?
+        // }}}
       }
-      CloseStaleAccount { prev_entrys_out_ref, entrys_out_ref } -> {
+      CloseStaleAccount {
+        prev_entrys_index,
+        closing_entrys_index,
+        closing_accounts_index,
+        closing_accounts_ref_script_index
+      } -> {
+        // {{{
         // Accounts older than 6 years are up for grabs (it'll be 5 years for
         // the contributor). This is meant as a measure to prevent permanent
-        // locking of funds.
+        // locking of funds and unavailability of an unused username.
         // 1. Three UTxOs are expected to be spent such that one of them points
-        //    to the closing account's username, and the other two are closing
-        //    account's entry and "info" UTxOs
-        // 2. Both closing account's NFTs must be getting burnt
+        //    to the closing account's username, and the other three are closing
+        //    account's entry, "info," and reference script UTxOs
+        // 2. All three closing account's tokens must be getting burnt
         // 3. Datum of the previous account must be updated so that it points to
-        //    the (potential) account that the closing account points to
+        //    the (potential) account that the closing account points to (note
+        //    that unlike `MintNewAccount` endpoint, here we won't allow value
+        //    of previous entry's UTxO to change, since its datum can only
+        //    decrease in size)
 
-        // Only 3 UTxOs must be spent from the script:
+        // Only 4 UTxOs must be spent from the record script:
         // 1. Previous entry
         // 2. Closing entry
         // 3. Closing account
-        expect [
-          Input { output: o0, output_reference: o0_out_ref },
-          Input { output: o1, output_reference: o1_out_ref },
-          Input { output: o2, output_reference: o2_out_ref },
-        ] =
-          list.filter(
-            inputs,
-            fn(i) {
-              when i.output.address.payment_credential is {
-                Script(_) -> True
-                _ -> False
+        // 4. Closing account's reference script
+        expect (
+          Some(prev_entrys_output),
+          Some(closing_entrys_output),
+          Some(closing_accounts_output),
+          Some(ref_scripts_output),
+          _
+        ) =
+          inputs |> list.foldl((None, None, None, None, 0), fn(i, acc) {
+            let (
+              m_prev_entry,
+              m_closing_entry,
+              m_closing_account,
+              m_ref_script,
+              curr_index
+            ) = acc
+            let next_index = curr_index + 1
+            let Input {
+              output: Output {
+                address: Address { payment_credential, .. },
+                ..
+              } as o,
+              ..
+            } = i
+            when payment_credential is {
+              Script(inputs_script_hash) -> {
+                expect (inputs_script_hash == own_policy)?
+                if curr_index == prev_entrys_index {
+                  (Some(o), m_closing_entry, m_closing_account, m_ref_script, next_index)
+                } else if curr_index == closing_entrys_index {
+                  (m_prev_entry, Some(o), m_closing_account, m_ref_script, next_index)
+                } else if curr_index == closing_accounts_index {
+                  (m_prev_entry, m_closing_entry, Some(o), m_ref_script, next_index)
+                } else if curr_index == closing_accounts_ref_script_index {
+                  (m_prev_entry, m_closing_entry, m_closing_account, Some(o), next_index)
+                } else {
+                  fail @"Invalid input index encountered"
+                }
               }
-            },
-          )
-        let o0_is_prev = o0_out_ref == prev_entrys_out_ref
-        let o0_is_entrys = o0_out_ref == entrys_out_ref
-        let o1_is_prev = o1_out_ref == prev_entrys_out_ref
-        let o1_is_entrys = o1_out_ref == entrys_out_ref
-        let o2_is_prev = o2_out_ref == prev_entrys_out_ref
-        let o2_is_entrys = o2_out_ref == entrys_out_ref
+              _ -> {
+                (m_prev_entry, m_closing_entry, m_closing_account, m_ref_script, next_index)
+              }
+            }
+          })
 
         expect (
           Output {
-            address: Address {
-              payment_credential: Script(prev_entrys_script_hash),
-              ..
-            } as prev_entrys_address,
-            datum: InlineDatum(prev_datum),
-            value: prev_value,
+            address: prev_entrys_address,
+            value: prev_entrys_value,
+            datum: InlineDatum(prev_entrys_datum),
             ..
           },
           Output {
-            address: Address {
-              payment_credential: Script(closing_entrys_script_hash),
-              ..
-            },
-            datum: InlineDatum(entrys_datum),
-            value: entrys_value,
+            value: closing_entrys_value,
+            datum: InlineDatum(closing_entrys_datum),
             ..
           },
           Output {
-            address: Address {
-              payment_credential: Script(accounts_script_hash),
-              ..
-            },
-            datum: InlineDatum(accounts_datum),
-            value: accounts_value,
+            value: closing_accounts_value,
+            datum: InlineDatum(closing_accounts_datum),
             ..
           },
-        ) =
-          if and {
-            o0_is_prev,
-            o1_is_entrys,
-          } {
-            (o0, o1, o2)
-          } else if and {
-            o0_is_prev,
-            o2_is_entrys,
-          } {
-            (o0, o2, o1)
-          } else if and {
-            o1_is_prev,
-            o0_is_entrys,
-          } {
-            (o1, o0, o2)
-          } else if and {
-            o1_is_prev,
-            o2_is_entrys,
-          } {
-            (o1, o2, o0)
-          } else if and {
-            o2_is_prev,
-            o0_is_entrys,
-          } {
-            (o2, o0, o1)
-          } else if and {
-            o2_is_prev,
-            o1_is_entrys,
-          } {
-            (o2, o1, o0)
-          } else {
-            fail @"Given out refs don't match found inputs properly"
-          }
-
-        // Both entry UTxOs are expected to be coming from this script address,
-        // while account's UTxO is expected to come from somewhere else.
-        expect and {
-            prev_entrys_script_hash == own_policy,
-            closing_entrys_script_hash == own_policy,
-            !(accounts_script_hash == own_policy),
-          }?
+          Output {
+            value: ref_scripts_value,
+            datum: InlineDatum(ref_scripts_datum),
+            reference_script: Some(_),
+            ..
+          },
+        ) = (
+          prev_entrys_output,
+          closing_entrys_output,
+          closing_accounts_output,
+          ref_scripts_output
+        )
 
         let (prev_entrys_policy, prev_entrys_token_name, prev_entrys_qty) =
-          utils.get_single_asset_from_value_apart_from_ada(prev_value)
-        let (entrys_policy, entrys_token_name, entrys_qty) =
-          utils.get_single_asset_from_value_apart_from_ada(entrys_value)
-        let (accounts_policy, accounts_token_name, accounts_qty) =
-          utils.get_single_asset_from_value_apart_from_ada(accounts_value)
+          utils.get_single_asset_from_value_apart_from_ada(prev_entrys_value)
+        let (closing_entrys_policy, closing_username, closing_entrys_qty) =
+          utils.get_single_asset_from_value_apart_from_ada(closing_entrys_value)
+        let (closing_accounts_policy, closing_accounts_token_name, closing_accounts_qty) =
+          utils.get_single_asset_from_value_apart_from_ada(closing_accounts_value)
+        let (ref_scripts_policy, ref_scripts_token_name, ref_scripts_qty) =
+          utils.get_single_asset_from_value_apart_from_ada(ref_scripts_value)
 
         // Spent tokens must be authentic.
         expect and {
             prev_entrys_policy == own_policy,
-            entrys_policy == own_policy,
-            accounts_policy == own_policy,
-            or {
-              bytearray.take(prev_entrys_token_name, 1) == constants.entrys_token_name_byte,
-              prev_entrys_token_name == #"",
-            },
-            bytearray.take(entrys_token_name, 1) == constants.entrys_token_name_byte,
-            bytearray.take(accounts_token_name, 1) == constants.accounts_token_name_byte,
+            closing_entrys_policy == own_policy,
+            closing_accounts_policy == own_policy,
+            ref_scripts_policy == own_policy,
+            closing_username == closing_accounts_token_name,
+            closing_username == ref_scripts_token_name,
             prev_entrys_qty == 1,
-            entrys_qty == 1,
-            accounts_qty == 1,
+            closing_entrys_qty == 1,
+            closing_accounts_qty == 1,
+            ref_scripts_qty == 1,
           }?
 
         // Usernames and token names must match properly.
-        let closing_username = bytearray.drop(accounts_token_name, 1)
-        expect (bytearray.drop(entrys_token_name, 1) == closing_username)?
         expect Entry {
           next_username: Some(stored_closing_username),
           contributor: prev_entrys_contributor,
-        }: Entry = prev_datum
+        }: RecordDatum = prev_entrys_datum
         expect (stored_closing_username == closing_username)?
         expect Entry {
           next_username: closing_entrys_next_username,
@@ -429,26 +420,25 @@ validator record(utxo_ref: OutputReference) {
             payment_credential: closing_entrys_contributor,
             ..
           },
-        }: Entry = entrys_datum
+        }: RecordDatum = closing_entrys_datum
         let prev_entrys_updated_datum: Data =
           Entry {
             next_username: closing_entrys_next_username,
             contributor: prev_entrys_contributor,
           }
 
-        // Exactly two assets must be burnt for `closing_username`.
-        let (burn_username, burn_qty) =
-          mint
-            |> utils.get_entry_and_account_mint_username_and_quantity_of(
-                own_policy,
-              )
+        // Exactly one asset must be burnt for `closing_username`, with a
+        // quantity of -3. Here too there is no need to validate the burnt
+        // asset's policy.
+        let [(_, burn_username, burn_qty)] = assets.flatten(mint)
         expect and {
             burn_username == closing_username,
-            burn_qty == -1,
+            burn_qty == -3,
           }?
 
         // Closing account must be considered stale.
-        expect AccountDatum { latest_activity, .. } = accounts_datum
+        expect AccountDatum { latest_activity, .. }: RecordDatum =
+          closing_accounts_datum
         expect
           utils.account_is_stale(
             latest_activity,
@@ -474,8 +464,9 @@ validator record(utxo_ref: OutputReference) {
         and {
           cont_prev_address == prev_entrys_address,
           cont_prev_datum == prev_entrys_updated_datum,
-          cont_prev_value == prev_value,
+          cont_prev_value == prev_entrys_value,
         }?
+        // }}}
       }
     }
   }

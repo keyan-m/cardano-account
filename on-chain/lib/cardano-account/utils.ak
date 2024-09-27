@@ -128,17 +128,20 @@ pub fn get_single_script_input(inputs: List<Input>) -> Input {
     list.filter(
       inputs,
       fn(i) {
-        let Input {
-          output: Output { address: Address { payment_credential, .. }, .. },
-          ..
-        } = i
-        when payment_credential is {
+        when i.output.address.payment_credential is {
           Script(_) -> True
           _ -> False
         }
       },
     )
   script_input
+}
+
+pub fn keep_only_inputs_from_credential(
+  inputs: List<Input>,
+  cred: Credential
+) -> List<Input> {
+  inputs |> list.filter(fn(i) { i.output.address.payment_credential == cred })
 }
 
 pub fn get_upper_bound(validity_range: ValidityRange) -> Int {

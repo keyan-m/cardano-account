@@ -23,7 +23,9 @@ pub type RecordMintAction {
   InitiateRecord
   MintNewAccount { username: ByteArray, signature: ByteArray }
   CloseStaleAccount {
-    prev_entrys_out_ref: OutputReference,
-    entrys_out_ref: OutputReference,
+    prev_entrys_index: Int,
+    closing_entrys_index: Int,
+    closing_accounts_index: Int,
+    closing_accounts_ref_script_index: Int,
   }
 }
