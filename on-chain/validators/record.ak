@@ -37,9 +37,14 @@ validator record(utxo_ref: OutputReference) {
       InitiateRecord -> {
         // Initial endpoint for starting the linked list. Requirements are:
         // 1. Specified UTxO must be getting spent
-        // 2. A single, nameless NFT is minted at the script address
-        // 3. Output datum is `Entry { next_username: None, contributor }`,
+        // 2. Exactly two nameless tokens are minted at the script address
+        // 3. Two UTxOs are produced at the script: list head at index 0, record
+        //    validator's deployed script at index 1
+        // 4. List head's output datum is
+        //      `Entry { next_username: None, contributor }`
         //    where the contributor can be set arbitrarily
+        // 5. Reference UTxO has a `DeployedScript` datum
+        // 6. Each of the two produced UTxOs carry one of the nameless tokens
 
         // To enforce a single initiation, the specified UTxO must be spent.
         expect
@@ -105,40 +110,33 @@ validator record(utxo_ref: OutputReference) {
         // Requires the proper entry in the list to be spent so that its datum
         // correctly points to the new account's username. The proper entry is
         // a previously created entry such that:
-        // 1. Its own token name (i.e.
-        //    `constants.entrys_token_name_byte` + username) is smaller than the
-        //     new account's entry token name
+        // 1. Its own token name (i.e. username) is smaller than the new
+        //    account's entry token name
         // 2. The account it (potentially) points to as its `next_username` has
         //    a username that is larger than the new account's
+        // Note that token names are NOT labeled, as none of them can leave the
+        // record script.
 
-        // Security measure to prevent raw username submissions. It's 31 rather
-        // than 32 since one extra byte needs to be prepended.
-        expect (bytearray.length(username) == 31)?
+        // Security measure to prevent raw username submissions.
+        expect (bytearray.length(username) == 32)?
 
-        // Exactly two assets must be minted for `username`.
-        let (mint_username, mint_qty) =
-          mint
-            |> utils.get_entry_and_account_mint_username_and_quantity_of(
-                own_policy,
-              )
+        // Exactly one asset must be minted for `username`, with a quantity of
+        // three. No need to validate the minted asset's policy.
+        let [(_, mint_name, mint_qty)] = mint |> assets.flatten
         expect and {
             mint_username == username,
-            mint_qty == 1,
+            mint_qty == 3,
           }?
 
-        // Minted tokens must have identical names apart from their first bytes.
-        let entrys_token_name =
-          username |> bytearray.push(constants.entrys_token_name_byte_value)
-        let accounts_token_name =
-          username |> bytearray.push(constants.accounts_token_name_byte_value)
+        let own_script = Script(own_policy)
 
         // Only 1 UTxO must be spent from the script address.
         expect [
           Input {
             output: Output {
-              address: curr_address,
+              address: prev_entrys_address,
               datum: InlineDatum(prev_entry_data),
-              value: curr_value,
+              value: prev_entrys_value,
               ..
             },
             output_reference: own_out_ref,
@@ -146,25 +144,22 @@ validator record(utxo_ref: OutputReference) {
         ] =
           list.filter(
             inputs,
-            fn(i) { i.output.address.payment_credential == Script(own_policy) },
+            fn(i) { i.output.address.payment_credential == own_script },
           )
 
-        // Only Ada and previous entry's NFT must be carried in the UTxO. Note
-        // that here full token names are compared.
-        let curr_asset =
-          utils.get_single_asset_from_value_apart_from_ada(curr_value)
-        let (curr_asset_policy, curr_asset_tn, _) = curr_asset
+        // Only Ada and previous entry's token must be carried in the UTxO.
+        let prev_entrys_beacon =
+          utils.get_single_asset_from_value_apart_from_ada(prev_entrys_value)
+        expect (prev_entrys_beacon_policy, prev_entrys_beacon_name, 1) = prev_entrys_beacon
         expect and {
-            curr_asset_policy == own_policy,
-            or {
-              bytearray.take(curr_asset_tn, 1) == constants.entrys_token_name_byte,
-              curr_asset_tn == #"",
-            },
-            bytearray.compare(curr_asset_tn, entrys_token_name) == Less,
+            prev_entrys_beacon_policy == own_policy,
+            bytearray.compare(prev_entrys_beacon_name, username) == Less,
           }?
 
-        expect Entry { next_username, contributor: prev_entrys_contributor } =
-          prev_entry_data
+        expect Entry {
+          next_username: prev_entrys_next_username,
+          contributor: prev_entrys_contributor
+        }: RecordDatum = prev_entry_data
         let updated_datum =
           Entry {
             next_username: Some(username),
@@ -174,24 +169,22 @@ validator record(utxo_ref: OutputReference) {
         // New username must be smaller than a potential next user. Note that
         // only usernames are compared.
         expect
-          when next_username is {
+          when prev_entrys_next_username is {
             None -> True
             Some(prev_next_user) ->
               bytearray.compare(username, prev_next_user) == Less
           }?
 
-        // First 2 outputs are expected to be produced at the script address,
-        // 3rd one has to be produced somewhere else (presumably user's
-        // instantiation of the `account` script).
-        //
-        // 1. Updated previous entry input ------> (this script)
-        // 2. New entry -------------------------> (this script)
-        // 3. User's account UTxO ---------------> (outside)
+        // Four outputs are expected to be produced at the script address:
+        // 1. Updated previous entry input
+        // 2. New entry
+        // 3. User's account UTxO
+        // 4. User's account reference script
         //
         // Here we don't care about the staking parts. However, if the funds are
         // being provided by the `treasury` contract, it'll stipulate that the
-        // staking parts of the new entry, and the UTxO going outside, belong to
-        // the contributor.
+        // staking parts of all 3 new UTxOs (since the first one is just getting
+        // an updated datum) match the contributor's.
         expect [
           Output {
             address: o0_address,
@@ -217,10 +210,28 @@ validator record(utxo_ref: OutputReference) {
             datum: InlineDatum(o2_datum_data),
             reference_script: None,
           },
+          Output {
+            address: Address {
+              payment_credential: Script(o3_pay_cred_hash),
+              ..
+            },
+            value: o3_value,
+            datum: InlineDatum(o3_datum_data),
+            reference_script: Some(_),
+          },
           ..
         ] = outputs
 
-        expect Entry { next_username: entrys_next_username, .. } = o1_datum_data
+        // We don't care about Lovelace fluctuations, since in case previous
+        // entry's datum goes from a `None` to a `Some`, its minimum required
+        // Lovelaces increases.
+        let updated_prev_entrys_beacon =
+          utils.get_single_asset_from_value_apart_from_ada(o0_value)
+
+        expect Entry {
+          next_username: entrys_next_username,
+          ..
+        }: RecordDatum = o1_datum_data
         let (
           entrys_output_asset_policy,
           entrys_output_asset_name,
@@ -231,21 +242,40 @@ validator record(utxo_ref: OutputReference) {
           pubkey: specified_pubkey,
           nonce: specified_nonce,
           latest_activity: specified_latest_activity,
-        } = o2_datum_data
+        }: RecordDatum = o2_datum_data
         let (
           accounts_output_asset_policy,
           accounts_output_asset_name,
           accounts_output_asset_quantity,
         ) = utils.get_single_asset_from_value_apart_from_ada(o2_value)
 
+        expect DeployedScript: RecordDatum = o3_datum_data
+        let (
+          accounts_script_asset_policy,
+          accounts_script_asset_name,
+          accounts_script_asset_quantity,
+        ) = utils.get_single_asset_from_value_apart_from_ada(o3_value)
+
         and {
-          o0_address == curr_address,
+          // Address validations
+          o0_address == prev_entrys_address,
           o1_pay_cred_hash == own_policy,
-          // Account NFT is meant to be sent to the user-specific `account`
-          // smart contract.
-          !(o2_pay_cred_hash == own_policy),
+          o2_pay_cred_hash == own_policy,
+          o3_pay_cred_hash == own_policy,
+          // Value validations
+          updated_prev_entrys_beacon == prev_entrys_beacon,
+          entrys_output_asset_policy == own_policy,
+          entrys_output_asset_name == username,
+          entrys_output_asset_quantity == 1,
+          accounts_output_asset_policy == own_policy,
+          accounts_output_asset_name == username,
+          accounts_output_asset_quantity == 1,
+          accounts_script_asset_policy == own_policy,
+          accounts_script_asset_name == username,
+          accounts_script_asset_quantity == 1,
+          // Datum validations
           o0_datum == InlineDatum(updated_datum),
-          entrys_next_username == next_username,
+          entrys_next_username == prev_entrys_next_username,
           specified_nonce == cbor.serialise(own_out_ref),
           specified_latest_activity == utils.get_upper_bound(validity_range),
           utils.outputs_signed_by_ed25519_key(
@@ -253,13 +283,6 @@ validator record(utxo_ref: OutputReference) {
             outputs,
             signature,
           ),
-          o0_value == curr_value,
-          entrys_output_asset_policy == own_policy,
-          entrys_output_asset_name == entrys_token_name,
-          entrys_output_asset_quantity == 1,
-          accounts_output_asset_policy == own_policy,
-          accounts_output_asset_name == accounts_token_name,
-          accounts_output_asset_quantity == 1,
         }?
       }
       CloseStaleAccount { prev_entrys_out_ref, entrys_out_ref } -> {

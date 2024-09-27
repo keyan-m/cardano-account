@@ -77,7 +77,7 @@ validator treasury(record_script_hash: ScriptHash) {
       },
       ..
     ] = outputs
-    expect Entry { contributor: new_entrys_contributor, .. }: Entry =
+    expect Entry { contributor: new_entrys_contributor, .. }: RecordDatum =
       new_entrys_datum_data
     and {
       // Staking parts of the 3 newly produced UTxOs must match that of
