@@ -1,7 +1,7 @@
+// === IMPORTS =================================================================
 use aiken/cbor
 use aiken/collection/pairs
 use aiken/crypto.{ScriptHash}
-// === IMPORTS =================================================================
 use aiken/primitive/bytearray
 use cardano/address.{Address, Credential, Script}
 use cardano/certificate.{Certificate, RegisterCredential, UnregisterCredential}
@@ -10,7 +10,9 @@ use cardano/transaction.{
   Transaction, ValidityRange,
 }
 use cardano_account/constants as constants
-use cardano_account/types.{AccountDatum, Contributor, Entry}
+use cardano_account/types.{
+  AccountDatum, Contributor, DeployedScript, Entry, RecordDatum,
+}
 use cardano_account/utils.{PubKeyHash} as utils
 
 // === DATATYPES ===============================================================

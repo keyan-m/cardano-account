@@ -1,17 +1,29 @@
 use cardano/address.{Credential}
-
-pub type AccountDatum {
-  pubkey: ByteArray,
-  nonce: ByteArray,
-  latest_activity: Int,
-}
+use cardano/transaction.{OutputReference}
 
 pub type Contributor {
-  payment_credential: Credential,
+  verification_key_hash: ByteArray,
   stake_credential: Credential,
 }
 
-pub type Entry {
-  next_username: Option<ByteArray>,
-  contributor: Contributor,
+pub type RecordDatum {
+  Entry {
+    next_username: Option<ByteArray>,
+    contributor: Contributor,
+  }
+  Account {
+    pubkey: ByteArray,
+    nonce: ByteArray,
+    latest_activity: Int,
+  }
+  DeployedScript
+}
+
+pub type RecordMintAction {
+  InitiateRecord
+  MintNewAccount { username: ByteArray, signature: ByteArray }
+  CloseStaleAccount {
+    prev_entrys_out_ref: OutputReference,
+    entrys_out_ref: OutputReference,
+  }
 }

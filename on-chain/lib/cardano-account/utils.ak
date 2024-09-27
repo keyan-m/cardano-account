@@ -37,20 +37,18 @@ pub fn get_single_mint_quantity_of(
   mint_quantity
 }
 
-pub fn get_two_mint_nfts_of(mint: Value, script_hash: ScriptHash) -> Int {
-  expect [(mint_policy_0, _, mint_qty_0),
-    (mint_policy_1, _, mint_qty_1)] =
+pub fn get_single_mint_token_of(
+  mint: Value,
+  script_hash: ScriptHash
+) -> Pair<ByteArray, Int> {
+  expect [(mint_policy, mint_name, mint_qty)] =
     mint
       |> assets.flatten
 
-  // Exactly two NFTs must be minted with the same script hash.
-  expect and {
-      mint_policy_0 == script_hash,
-      mint_policy_1 == script_hash,
-      mint_qty_0 == mint_qty_1,
-    }?
+  // The single mint asset must match the expected policy.
+  expect (mint_policy == script_hash)?
 
-  mint_qty_0
+  Pair(mint_name, mint_qty)
 }
 
 // Validates only 2 tokens are minted/burnt such that:

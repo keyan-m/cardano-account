@@ -1,6 +1,6 @@
+// === IMPORTS =================================================================
 use aiken/cbor
 use aiken/collection/list
-// === IMPORTS =================================================================
 use aiken/primitive/bytearray
 use cardano/address.{Address, Script}
 use cardano/assets.{PolicyId, Value}
@@ -8,18 +8,13 @@ use cardano/transaction.{
   InlineDatum, Input, Output, OutputReference, Transaction,
 }
 use cardano_account/constants as constants
-use cardano_account/types.{AccountDatum, Contributor, Entry} as types
+use cardano_account/types.{
+  Account, CloseStaleAccount, Contributor, DeployedScript, Entry,
+  InitiateRecord, MintNewAccount, RecordDatum, RecordMintAction,
+} as types
 use cardano_account/utils as utils
 
 // === DATATYPES ===============================================================
-pub type MintAction {
-  InitiateRecord
-  MintNewAccount { username: ByteArray, signature: ByteArray }
-  CloseStaleAccount {
-    prev_entrys_out_ref: OutputReference,
-    entrys_out_ref: OutputReference,
-  }
-}
 
 pub type SpendAction {
   AppendToNewAccount { input_index: Int }
@@ -28,7 +23,7 @@ pub type SpendAction {
 
 // === THE VALIDATOR ===========================================================
 validator record(utxo_ref: OutputReference) {
-  mint(action: MintAction, own_policy: PolicyId, tx: Transaction) {
+  mint(action: RecordMintAction, own_policy: PolicyId, tx: Transaction) {
     let Transaction {
       extra_signatories,
       inputs,
@@ -50,34 +45,61 @@ validator record(utxo_ref: OutputReference) {
         expect
           list.any(inputs, fn(input) { input.output_reference == utxo_ref })?
 
-        // Only a single, nameless token must be minted.
+        // Only a single, nameless token must be minted, with a quantity of 2,
+        // 1 for the linked list head, and the other for the deployed script.
         expect [mint_triplet] =
           mint
             |> assets.flatten
-        expect (_, mint_name, 1) = mint_triplet
-        expect (mint_name == #"")?
+        expect (_, mint_name, 2) = mint_triplet
 
-        // First produced UTxO must go to the script.
+        // First 2 produced UTxOs must go to the script.
         expect [
           Output {
-            datum: InlineDatum(list_head_datum),
+            address: Address {
+              payment_credential: Script(list_head_script_hash),
+              ..
+            },
             value: list_head_value,
-            address: Address { payment_credential: Script(own_script_hash), .. },
+            datum: InlineDatum(list_head_datum_data),
             reference_script: None,
+          },
+          Output {
+            address: Address {
+              payment_credential: Script(records_ref_script_script_hash),
+              ..
+            },
+            value: records_ref_script_value,
+            datum: InlineDatum(records_ref_script_datum_data),
+            reference_script: Some(_),
           },
           ..
         ] = outputs
-        expect (own_script_hash == own_policy)?
 
         // Linked list must be empty at initiation.
-        expect Entry { next_username: None, .. } = list_head_datum
+        expect Entry { next_username: None, .. } = list_head_datum_data
+
+        // Proper datum must be attached to the reference script's UTxO.
+        expect DeployedScript = records_ref_script_datum_data
 
         // List head UTxO must contain only one other asset apart from ADA.
-        let list_head_asset =
+        let (list_head_asset_symbol, list_head_asset_name, list_head_asset_qty) =
           utils.get_single_asset_from_value_apart_from_ada(list_head_value)
 
-        // List head's asset must match the minted asset.
-        (list_head_asset == mint_triplet)?
+        // Record's reference script UTxO must contain only one other asset
+        // apart from ADA.
+        let (records_ref_script_asset_symbol, records_ref_script_asset_name, records_ref_script_asset_qty) =
+          utils.get_single_asset_from_value_apart_from_ada(records_ref_script_value)
+        expect and {
+          list_head_script_hash == own_policy,
+          records_ref_script_script_hash == own_policy,
+          mint_name == #"",
+          list_head_asset_symbol == own_policy,
+          list_head_asset_name == mint_name,
+          list_head_asset_qty == 1,
+          records_ref_script_asset_symbol == own_policy,
+          records_ref_script_asset_name == mint_name,
+          records_ref_script_asset_qty == 1,
+        }?
       }
       MintNewAccount { username, signature } -> {
         // Requires the proper entry in the list to be spent so that its datum
