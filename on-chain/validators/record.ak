@@ -15,10 +15,17 @@ use cardano_account/types.{
 use cardano_account/utils as utils
 
 // === DATATYPES ===============================================================
-
 pub type RecordSpendAction {
   AppendToNewAccount { input_index: Int }
   DepleteAccount { input_index: Int }
+  AuthorizedSpend { signature: ByteArray, accounts_input_index: Int }
+}
+
+pub type Intent {
+  ProveActivity
+  UpdatePubkey {
+    signature_with_new_key: ByteArray,
+  }
 }
 
 // === THE VALIDATOR ===========================================================
@@ -303,55 +310,90 @@ validator record(utxo_ref: OutputReference) {
         //    of previous entry's UTxO to change, since its datum can only
         //    decrease in size)
 
+        let
+          m_prev_entrys_output,
+          m_closing_entrys_output,
+          m_closing_accounts_output,
+          m_ref_scripts_output,
+          _last_index,
+        <-
+          utils.fold5(inputs, None, None, None, None, 0, fn(
+              i,
+              m_prev_entry,
+              m_closing_entry,
+              m_closing_account,
+              m_ref_script,
+              curr_index,
+              return
+            ) {
+              let next_index = curr_index + 1
+              let Input {
+                output: Output {
+                  address: Address { payment_credential, .. },
+                  ..
+                } as o,
+                ..
+              } = i
+              when payment_credential is {
+                Script(inputs_script_hash) -> {
+                  expect (inputs_script_hash == own_policy)?
+                  if curr_index == prev_entrys_index {
+                    return(
+                      Some(o),
+                      m_closing_entry,
+                      m_closing_account,
+                      m_ref_script,
+                      next_index
+                    )
+                  } else if curr_index == closing_entrys_index {
+                    return(
+                      m_prev_entry,
+                      Some(o),
+                      m_closing_account,
+                      m_ref_script,
+                      next_index
+                    )
+                  } else if curr_index == closing_accounts_index {
+                    return(
+                      m_prev_entry,
+                      m_closing_entry,
+                      Some(o),
+                      m_ref_script,
+                      next_index
+                    )
+                  } else if curr_index == closing_accounts_ref_script_index {
+                    return(
+                      m_prev_entry,
+                      m_closing_entry,
+                      m_closing_account,
+                      Some(o),
+                      next_index
+                    )
+                  } else {
+                    fail @"Invalid input index encountered"
+                  }
+                }
+                _ -> {
+                  return(
+                    m_prev_entry,
+                    m_closing_entry,
+                    m_closing_account,
+                    m_ref_script,
+                    next_index
+                  )
+                }
+              }
+            }
+          )
         // Only 4 UTxOs must be spent from the record script:
         // 1. Previous entry
         // 2. Closing entry
         // 3. Closing account
         // 4. Closing account's reference script
-        expect (
-          Some(prev_entrys_output),
-          Some(closing_entrys_output),
-          Some(closing_accounts_output),
-          Some(ref_scripts_output),
-          _
-        ) =
-          inputs |> list.foldl((None, None, None, None, 0), fn(i, acc) {
-            let (
-              m_prev_entry,
-              m_closing_entry,
-              m_closing_account,
-              m_ref_script,
-              curr_index
-            ) = acc
-            let next_index = curr_index + 1
-            let Input {
-              output: Output {
-                address: Address { payment_credential, .. },
-                ..
-              } as o,
-              ..
-            } = i
-            when payment_credential is {
-              Script(inputs_script_hash) -> {
-                expect (inputs_script_hash == own_policy)?
-                if curr_index == prev_entrys_index {
-                  (Some(o), m_closing_entry, m_closing_account, m_ref_script, next_index)
-                } else if curr_index == closing_entrys_index {
-                  (m_prev_entry, Some(o), m_closing_account, m_ref_script, next_index)
-                } else if curr_index == closing_accounts_index {
-                  (m_prev_entry, m_closing_entry, Some(o), m_ref_script, next_index)
-                } else if curr_index == closing_accounts_ref_script_index {
-                  (m_prev_entry, m_closing_entry, m_closing_account, Some(o), next_index)
-                } else {
-                  fail @"Invalid input index encountered"
-                }
-              }
-              _ -> {
-                (m_prev_entry, m_closing_entry, m_closing_account, m_ref_script, next_index)
-              }
-            }
-          })
-
+        expect Some(prev_entrys_output) = m_prev_entrys_output
+        expect Some(closing_entrys_output) = m_closing_entrys_output
+        expect Some(closing_accounts_output) = m_closing_accounts_output
+        expect Some(ref_scripts_output) = m_ref_scripts_output
         expect (
           Output {
             address: prev_entrys_address,
@@ -474,17 +516,47 @@ validator record(utxo_ref: OutputReference) {
     own_out_ref: OutputReference,
     tx: Transaction,
   ) {
-    expect Some(_) = datum
+    let Transaction { inputs, outputs, mint, .. } = tx
 
-    let Transaction { inputs, mint, .. } = tx
-
-    // Both endpoints only need to make sure the minting endpoint is invoked
-    // with a single asset of own script hash.
     when action is {
       AppendToNewAccount { input_index } ->
+        // This only needs to make sure the minting endpoint is invoked with a
+        // single asset of own script hash.
         validate_mint(input_index, 3, own_out_ref, inputs, mint)?
       DepleteAccount { input_index } ->
+        // This only needs to make sure the minting endpoint is invoked with a
+        // single asset of own script hash.
         validate_mint(input_index, -3, own_out_ref, inputs, mint)?
+      AuthorizedSpend { signature, accounts_input_index, intent } -> {
+        expect Some(input_datum) = datum
+        expect Account {
+          pubkey,
+          nonce,
+          latest_activity,
+        }: RecordDatum = input_datum
+        expect Output {
+          address: Address {
+            payment_credential: Script(own_script_hash),
+            ..
+          } as own_address,
+          value: own_value,
+          reference_script: None,
+          ..
+        } = utils.get_own_input_at(
+          inputs,
+          own_out_ref,
+          accounts_input_index
+        )
+        expect utils.outputs_signed_by_ed25519_key(pubkey, outputs, signature)?
+        when intent is {
+          ProveActivity -> {
+            todo
+          }
+          UpdatePubkey { signature_with_new_key } -> {
+            todo
+          }
+        }
+      }
     }
   }
 

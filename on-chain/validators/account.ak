@@ -6,25 +6,16 @@ use aiken/primitive/bytearray
 use cardano/address.{Address, Credential, Script}
 use cardano/certificate.{Certificate, RegisterCredential, UnregisterCredential}
 use cardano/transaction.{
-  InlineDatum, Input, Output, OutputReference, Redeemer, ScriptPurpose, Spend,
-  Transaction, ValidityRange,
+  Datum, InlineDatum, Input, Output, OutputReference, Redeemer, ScriptPurpose,
+  Spend, Transaction, ValidityRange,
 }
 use cardano_account/constants as constants
 use cardano_account/types.{
-  AccountDatum, Contributor, DeployedScript, Entry, RecordDatum,
+  Account, Contributor, DeployedScript, Entry, RecordDatum,
 }
 use cardano_account/utils.{PubKeyHash} as utils
 
 // === DATATYPES ===============================================================
-pub type Intent {
-  UpdatePubkey { signature: ByteArray }
-  ProveActivity
-}
-
-pub type AccountAction {
-  Authorized { signature: ByteArray, intent: Intent }
-  OpenClaim
-}
 
 pub type ObserverAction {
   VerifySpentAccount { accounts_input_index: Int }
@@ -37,7 +28,7 @@ pub type ObserverAction {
 // === THE VALIDATOR ===========================================================
 validator account(record_script_hash: ScriptHash, username: ByteArray) {
   spend(
-    datum: Option<AccountDatum>,
+    datum: Option<Datum>,
     action: AccountAction,
     own_out_ref: OutputReference,
     tx: Transaction,

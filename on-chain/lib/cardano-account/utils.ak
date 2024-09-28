@@ -3,16 +3,55 @@ use aiken/cbor
 use aiken/collection/list
 use aiken/crypto.{ScriptHash, VerificationKeyHash}
 use aiken/interval.{Finite, Interval, IntervalBound}
-use aiken/primitive/bytearray
 use cardano/address.{Address, Credential, Script, VerificationKey}
 use cardano/assets.{AssetName, PolicyId, Value}
 use cardano/transaction.{
   InlineDatum, Input, Output, OutputReference, ValidityRange,
 }
-use cardano_account/constants.{accounts_token_name_byte, entrys_token_name_byte}
+use cardano_account/constants
 
 pub type PubKeyHash =
   VerificationKeyHash
+
+type Fold5<a, b, c, d, e, result> =
+  fn(a, b, c, d, e) -> result
+
+fn do_fold5(
+  self: List<x>,
+  with: fn(x, a, b, c, d, e, Fold5<a, b, c, d, e, result>) -> result,
+  return: Fold5<a, b, c, d, e, result>
+) -> Fold5<a, b, c, d, e, result> {
+  when self is {
+    [] -> return
+    [x, ..xs] -> {
+      do_fold5(
+        xs,
+        with,
+        fn(a, b, c, d, e) { with(x, a, b, c, d, e, return) }
+      )
+    }
+  }
+}
+
+// Credit for this function goes to KtorZ
+pub fn foldl5(
+  self: List<x>,
+  zero_a: a,
+  zero_b: b,
+  zero_c: c,
+  zero_d: d,
+  zero_e: e,
+  with: fn(x, a, b, c, d, e, Fold5<a, b, c, d, e, result>) -> result,
+  return: Fold5<a, b, c, d, e, result>
+) -> result {
+  do_fold5(self, with, return)(
+    zero_a,
+    zero_b,
+    zero_c,
+    zero_d,
+    zero_e,
+  )
+}
 
 // This functions assumes the "first" asset is ADA.
 pub fn get_single_asset_from_value_apart_from_ada(
@@ -35,49 +74,6 @@ pub fn get_single_mint_quantity_of(
       |> assets.flatten
   expect (mint_policy == target_policy)?
   mint_quantity
-}
-
-pub fn get_single_mint_token_of(
-  mint: Value,
-  script_hash: ScriptHash
-) -> (ByteArray, Int) {
-  expect [(mint_policy, mint_name, mint_qty)] =
-    mint
-      |> assets.flatten
-
-  // The single mint asset must match the expected policy.
-  expect (mint_policy == script_hash)?
-
-  (mint_name, mint_qty)
-}
-
-// Validates only 2 tokens are minted/burnt such that:
-// 1. Both have the same policy as `target_policy`
-// 2. First one has an "entry label"
-// 3. Second one has an "account label"
-// 4. Both token names are identical apart from their labels
-// 5. Quantities of both are equal
-// And returns the "username," along with the mint/burn quantity.
-pub fn get_entry_and_account_mint_username_and_quantity_of(
-  mint: Value,
-  target_policy: ScriptHash,
-) -> (ByteArray, Int) {
-  expect [
-    (entrys_policy, entrys_mint_name, entrys_mint_qty),
-    (accounts_policy, accounts_mint_name, accounts_mint_qty),
-  ] =
-    mint
-      |> assets.flatten
-  let username = entrys_mint_name |> bytearray.drop(1)
-  expect and {
-      entrys_policy == target_policy,
-      accounts_policy == target_policy,
-      bytearray.take(entrys_mint_name, 1) == entrys_token_name_byte,
-      bytearray.take(accounts_mint_name, 1) == accounts_token_name_byte,
-      bytearray.drop(accounts_mint_name, 1) == username,
-      entrys_mint_qty == accounts_mint_qty,
-    }?
-  (username, entrys_mint_qty)
 }
 
 pub fn get_own_input_at(
