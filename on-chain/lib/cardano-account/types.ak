@@ -12,7 +12,7 @@ pub type RecordDatum {
   }
   Account {
     pubkey: ByteArray,
-    nonce: ByteArray,
+    salt: ByteArray,
     latest_activity: Int,
   }
   DeployedScript

@@ -3,10 +3,10 @@ use aiken/cbor
 use aiken/collection/list
 use aiken/crypto.{ScriptHash, VerificationKeyHash}
 use aiken/interval.{Finite, Interval, IntervalBound}
-use cardano/address.{Address, Credential, Script, VerificationKey}
+use cardano/address.{Address, Credential, Script}
 use cardano/assets.{AssetName, PolicyId, Value}
 use cardano/transaction.{
-  InlineDatum, Input, Output, OutputReference, ValidityRange,
+  Input, Output, OutputReference, ValidityRange,
 }
 use cardano_account/constants
 
@@ -87,10 +87,9 @@ pub fn get_own_input_at(
   own_utxo
 }
 
-pub fn get_authentic_input_at(
+pub fn get_authentic_input_of_at(
   reference_inputs: List<Input>,
   address_script_hash: ScriptHash,
-  nft_policy: ScriptHash,
   nft_token_name: ByteArray,
   input_index: Int,
 ) -> Input {
@@ -98,7 +97,6 @@ pub fn get_authentic_input_at(
     Input {
       output: Output {
         address: Address { payment_credential: Script(refs_script_hash), .. },
-        datum: InlineDatum(_),
         value: refs_value,
         ..
       },
@@ -111,7 +109,7 @@ pub fn get_authentic_input_at(
 
   expect and {
       refs_script_hash == address_script_hash,
-      refs_nft_policy == nft_policy,
+      refs_nft_policy == address_script_hash,
       refs_nft_token_name == nft_token_name,
       refs_nft_qty == 1,
     }?
@@ -176,7 +174,7 @@ pub fn outputs_signed_by_ed25519_key(
 
 pub fn account_is_stale(
   latest_activity: Int,
-  accounts_contributor: Credential,
+  accounts_contributor_vkh: VerificationKeyHash,
   extra_signatories: List<VerificationKeyHash>,
   validity_range: ValidityRange,
 ) -> Bool {
@@ -184,21 +182,17 @@ pub fn account_is_stale(
   // staleness.
   //
   // The contributor who had provided the initial funds for creating the account
-  // has the right to claim all the funds earlier than public (unless the 
-  // contributor was a script, validating a UTxO spent from its address would
-  // add too much complexity).
+  // has the right to claim all the funds earlier than public (contributor is
+  // enforced to be a verification key hash, validating a script payment
+  // credential would add too much complexity).
   //
   // Therefore if contributor's signature is present, the shorter allowed
   // inactivity is used to validate staleness.
   let allowed_inactivity_period =
-    when accounts_contributor is {
-      VerificationKey(vkh) ->
-        if list.has(extra_signatories, vkh) {
-          constants.allowed_inactivity_period_before_contributor_can_claim
-        } else {
-          constants.allowed_inactivity_period_before_open_claim
-        }
-      Script(_) -> constants.allowed_inactivity_period_before_open_claim
+    if list.has(extra_signatories, accounts_contributor_vkh) {
+      constants.allowed_inactivity_period_before_contributor_can_claim
+    } else {
+      constants.allowed_inactivity_period_before_open_claim
     }
   let elapsed_since_inactivity =
     get_upper_bound(validity_range) - latest_activity

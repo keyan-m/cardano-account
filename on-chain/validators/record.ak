@@ -7,7 +7,6 @@ use cardano/assets.{PolicyId, Value}
 use cardano/transaction.{
   InlineDatum, Input, Output, OutputReference, Transaction,
 }
-use cardano_account/constants as constants
 use cardano_account/types.{
   Account, CloseStaleAccount, Contributor, DeployedScript, Entry,
   InitiateRecord, MintNewAccount, RecordDatum, RecordMintAction,
@@ -18,7 +17,11 @@ use cardano_account/utils as utils
 pub type RecordSpendAction {
   AppendToNewAccount { input_index: Int }
   DepleteAccount { input_index: Int }
-  AuthorizedSpend { signature: ByteArray, accounts_input_index: Int }
+  AuthorizedSpend {
+    signature: ByteArray,
+    accounts_input_index: Int,
+    intent: Intent
+  }
 }
 
 pub type Intent {
@@ -101,7 +104,7 @@ validator record(utxo_ref: OutputReference) {
         // apart from ADA.
         let (records_ref_script_asset_symbol, records_ref_script_asset_name, records_ref_script_asset_qty) =
           utils.get_single_asset_from_value_apart_from_ada(records_ref_script_value)
-        expect and {
+        and {
           list_head_script_hash == own_policy,
           records_ref_script_script_hash == own_policy,
           mint_name == #"",
@@ -242,9 +245,9 @@ validator record(utxo_ref: OutputReference) {
           entrys_output_asset_quantity,
         ) = utils.get_single_asset_from_value_apart_from_ada(o1_value)
 
-        expect AccountDatum {
+        expect Account {
           pubkey: specified_pubkey,
-          nonce: specified_nonce,
+          salt: specified_salt,
           latest_activity: specified_latest_activity,
         }: RecordDatum = o2_datum_data
         let (
@@ -280,7 +283,7 @@ validator record(utxo_ref: OutputReference) {
           // Datum validations
           o0_datum == InlineDatum(updated_datum),
           entrys_next_username == prev_entrys_next_username,
-          specified_nonce == cbor.serialise(own_out_ref),
+          specified_salt == cbor.serialise(own_out_ref),
           specified_latest_activity == utils.get_upper_bound(validity_range),
           utils.outputs_signed_by_ed25519_key(
             specified_pubkey,
@@ -317,7 +320,7 @@ validator record(utxo_ref: OutputReference) {
           m_ref_scripts_output,
           _last_index,
         <-
-          utils.fold5(inputs, None, None, None, None, 0, fn(
+          utils.foldl5(inputs, None, None, None, None, 0, fn(
               i,
               m_prev_entry,
               m_closing_entry,
@@ -424,7 +427,7 @@ validator record(utxo_ref: OutputReference) {
           ref_scripts_output
         )
 
-        let (prev_entrys_policy, prev_entrys_token_name, prev_entrys_qty) =
+        let (prev_entrys_policy, _prev_entrys_token_name, prev_entrys_qty) =
           utils.get_single_asset_from_value_apart_from_ada(prev_entrys_value)
         let (closing_entrys_policy, closing_username, closing_entrys_qty) =
           utils.get_single_asset_from_value_apart_from_ada(closing_entrys_value)
@@ -456,7 +459,7 @@ validator record(utxo_ref: OutputReference) {
         expect Entry {
           next_username: closing_entrys_next_username,
           contributor: Contributor {
-            payment_credential: closing_entrys_contributor,
+            verification_key_hash: closing_entrys_contributor,
             ..
           },
         }: RecordDatum = closing_entrys_datum
@@ -469,14 +472,14 @@ validator record(utxo_ref: OutputReference) {
         // Exactly one asset must be burnt for `closing_username`, with a
         // quantity of -3. Here too there is no need to validate the burnt
         // asset's policy.
-        let [(_, burn_username, burn_qty)] = assets.flatten(mint)
+        expect [(_, burn_username, burn_qty)] = assets.flatten(mint)
         expect and {
             burn_username == closing_username,
             burn_qty == -3,
           }?
 
         // Closing account must be considered stale.
-        expect AccountDatum { latest_activity, .. }: RecordDatum =
+        expect Account { latest_activity, .. }: RecordDatum =
           closing_accounts_datum
         expect
           utils.account_is_stale(
@@ -485,6 +488,8 @@ validator record(utxo_ref: OutputReference) {
             extra_signatories,
             validity_range,
           )?
+
+        expect DeployedScript: RecordDatum = ref_scripts_datum
 
         // First produced UTxO must go back to the script.
         expect [
@@ -516,7 +521,7 @@ validator record(utxo_ref: OutputReference) {
     own_out_ref: OutputReference,
     tx: Transaction,
   ) {
-    let Transaction { inputs, outputs, mint, .. } = tx
+    let Transaction { inputs, outputs, mint, validity_range, .. } = tx
 
     when action is {
       AppendToNewAccount { input_index } ->
@@ -529,11 +534,13 @@ validator record(utxo_ref: OutputReference) {
         validate_mint(input_index, -3, own_out_ref, inputs, mint)?
       AuthorizedSpend { signature, accounts_input_index, intent } -> {
         expect Some(input_datum) = datum
+
         expect Account {
           pubkey,
-          nonce,
-          latest_activity,
+          salt,
+          ..
         }: RecordDatum = input_datum
+
         expect Output {
           address: Address {
             payment_credential: Script(own_script_hash),
@@ -547,15 +554,58 @@ validator record(utxo_ref: OutputReference) {
           own_out_ref,
           accounts_input_index
         )
-        expect utils.outputs_signed_by_ed25519_key(pubkey, outputs, signature)?
-        when intent is {
-          ProveActivity -> {
-            todo
+
+        let (accounts_policy, _username, accounts_qty) =
+          utils.get_single_asset_from_value_apart_from_ada(own_value)
+
+        expect [
+          Output {
+            address: cont_address,
+            datum: InlineDatum(cont_datum_data),
+            value: cont_value,
+            reference_script: None,
+          },
+          ..
+        ] = outputs
+
+        expect Account {
+          pubkey: cont_pubkey,
+          salt: cont_salt,
+          latest_activity: cont_latest_activity,
+        }: RecordDatum = cont_datum_data
+
+        // 1. Input account UTxO must be authentic
+        // 2. Outputs must be signed by input account's stored `pubkey`
+        // 3. Account UTxO must go back to the script
+        // 4. Account's value must remain unchanged (this is fine as the
+        //    datum size won't change)
+        // 5. `latest_activity` must be updated
+        // 6. If the intent is to just prove activity, `pubkey` and `salt` must
+        //    remain unchanged, otherwise they both need to be updated, and the
+        //    outputs must also be signed by the new `pubkey`
+        and {
+          accounts_policy == own_script_hash,
+          accounts_qty == 1,
+          utils.outputs_signed_by_ed25519_key(pubkey, outputs, signature),
+          cont_address == own_address,
+          cont_value == own_value,
+          cont_latest_activity == utils.get_upper_bound(validity_range),
+          when intent is {
+            ProveActivity -> and {
+              cont_pubkey == pubkey,
+              cont_salt == salt,
+            }
+            UpdatePubkey { signature_with_new_key } -> and {
+              !(cont_pubkey == pubkey),
+              cont_salt == cbor.serialise(own_out_ref),
+              utils.outputs_signed_by_ed25519_key(
+                cont_pubkey,
+                outputs,
+                signature_with_new_key,
+              ),
+            }
           }
-          UpdatePubkey { signature_with_new_key } -> {
-            todo
-          }
-        }
+        }?
       }
     }
   }
@@ -579,5 +629,5 @@ fn validate_mint(
 
   let mint_qty = utils.get_single_mint_quantity_of(mint, own_script_hash)
 
-  expect (mint_qty == expected_mint_quantity)?
+  mint_qty == expected_mint_quantity
 }

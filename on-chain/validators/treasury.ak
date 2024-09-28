@@ -1,14 +1,10 @@
 use aiken/collection/list
-use aiken/collection/pairs
 use aiken/crypto.{ScriptHash}
 use cardano/address.{Address, Inline, Script}
 use cardano/transaction.{
-  InlineDatum, Input, Mint, Output, OutputReference, Transaction,
+  InlineDatum, Input, Output, OutputReference, Transaction,
 }
-use cardano_account/types.{
-  Contributor, DeployedScript, Entry, MintNewAccount, RecordDatum,
-  RecordMintAction,
-}
+use cardano_account/types.{Contributor, Entry, RecordDatum}
 use cardano_account/utils as utils
 
 validator treasury(record_script_hash: ScriptHash) {
