@@ -22,8 +22,7 @@ validator treasury(record_script_hash: ScriptHash) {
     // `record` contract's `MintNewAccount` must be the invoked endpoint. Note
     // the mint quantity of 3 implies this (and therefore it must remain in
     // sync!).
-    let mint_qty =
-      utils.get_single_mint_quantity_of(mint, record_script_hash)
+    let mint_qty = utils.get_single_mint_quantity_of(mint, record_script_hash)
     expect (mint_qty == 3)?
 
     // Apart from UTxOs spent from `record` script, only one script UTxO is
@@ -32,9 +31,7 @@ validator treasury(record_script_hash: ScriptHash) {
     expect [_] =
       list.filter(
         inputs,
-        fn(i) {
-          !(i.output.address.payment_credential == records_script)
-        },
+        fn(i) { !(i.output.address.payment_credential == records_script) },
       )
 
     // Note that this ordering must remain in sync with `record`'s new account

@@ -8,8 +8,8 @@ use cardano/transaction.{
   InlineDatum, Input, Output, OutputReference, Transaction,
 }
 use cardano_account/types.{
-  Account, CloseStaleAccount, Contributor, DeployedScript, Entry,
-  InitiateRecord, MintNewAccount, RecordDatum, RecordMintAction,
+  Account, CloseStaleAccount, Contributor, DeployedScript, Entry, InitiateRecord,
+  MintNewAccount, RecordDatum, RecordMintAction,
 } as types
 use cardano_account/utils as utils
 
@@ -20,15 +20,13 @@ pub type RecordSpendAction {
   AuthorizedSpend {
     signature: ByteArray,
     accounts_input_index: Int,
-    intent: Intent
+    intent: Intent,
   }
 }
 
 pub type Intent {
   ProveActivity
-  UpdatePubkey {
-    signature_with_new_key: ByteArray,
-  }
+  UpdatePubkey { signature_with_new_key: ByteArray }
 }
 
 // === THE VALIDATOR ===========================================================
@@ -102,8 +100,14 @@ validator record(utxo_ref: OutputReference) {
 
         // Record's reference script UTxO must contain only one other asset
         // apart from ADA.
-        let (records_ref_script_asset_symbol, records_ref_script_asset_name, records_ref_script_asset_qty) =
-          utils.get_single_asset_from_value_apart_from_ada(records_ref_script_value)
+        let (
+          records_ref_script_asset_symbol,
+          records_ref_script_asset_name,
+          records_ref_script_asset_qty,
+        ) =
+          utils.get_single_asset_from_value_apart_from_ada(
+            records_ref_script_value,
+          )
         and {
           list_head_script_hash == own_policy,
           records_ref_script_script_hash == own_policy,
@@ -115,8 +119,8 @@ validator record(utxo_ref: OutputReference) {
           records_ref_script_asset_name == mint_name,
           records_ref_script_asset_qty == 1,
         }?
-        // }}}
       }
+      // }}}
       MintNewAccount { username, signature } -> {
         // {{{
         // Requires the proper entry in the list to be spent so that its datum
@@ -151,13 +155,13 @@ validator record(utxo_ref: OutputReference) {
             },
             output_reference: own_out_ref,
           },
-        ] =
-          utils.keep_only_inputs_from_credential(inputs, own_script)
+        ] = utils.keep_only_inputs_from_credential(inputs, own_script)
 
         // Only Ada and previous entry's token must be carried in the UTxO.
         let prev_entrys_beacon =
           utils.get_single_asset_from_value_apart_from_ada(prev_entrys_value)
-        expect (prev_entrys_beacon_policy, prev_entrys_beacon_name, 1) = prev_entrys_beacon
+        expect (prev_entrys_beacon_policy, prev_entrys_beacon_name, 1) =
+          prev_entrys_beacon
         expect and {
             prev_entrys_beacon_policy == own_policy,
             bytearray.compare(prev_entrys_beacon_name, username) == Less,
@@ -165,7 +169,7 @@ validator record(utxo_ref: OutputReference) {
 
         expect Entry {
           next_username: prev_entrys_next_username,
-          contributor: prev_entrys_contributor
+          contributor: prev_entrys_contributor,
         }: RecordDatum = prev_entry_data
         let updated_datum =
           Entry {
@@ -235,10 +239,8 @@ validator record(utxo_ref: OutputReference) {
         let updated_prev_entrys_beacon =
           utils.get_single_asset_from_value_apart_from_ada(o0_value)
 
-        expect Entry {
-          next_username: entrys_next_username,
-          ..
-        }: RecordDatum = o1_datum_data
+        expect Entry { next_username: entrys_next_username, .. }: RecordDatum =
+          o1_datum_data
         let (
           entrys_output_asset_policy,
           entrys_output_asset_name,
@@ -291,13 +293,13 @@ validator record(utxo_ref: OutputReference) {
             signature,
           ),
         }?
-        // }}}
       }
+      // }}}
       CloseStaleAccount {
         prev_entrys_index,
         closing_entrys_index,
         closing_accounts_index,
-        closing_accounts_ref_script_index
+        closing_accounts_ref_script_index,
       } -> {
         // {{{
         // Accounts older than 6 years are up for grabs (it'll be 5 years for
@@ -320,14 +322,21 @@ validator record(utxo_ref: OutputReference) {
           m_ref_scripts_output,
           _last_index,
         <-
-          utils.foldl5(inputs, None, None, None, None, 0, fn(
+          utils.foldl5(
+            inputs,
+            None,
+            None,
+            None,
+            None,
+            0,
+            fn(
               i,
               m_prev_entry,
               m_closing_entry,
               m_closing_account,
               m_ref_script,
               curr_index,
-              return
+              return,
             ) {
               let next_index = curr_index + 1
               let Input {
@@ -346,7 +355,7 @@ validator record(utxo_ref: OutputReference) {
                       m_closing_entry,
                       m_closing_account,
                       m_ref_script,
-                      next_index
+                      next_index,
                     )
                   } else if curr_index == closing_entrys_index {
                     return(
@@ -354,7 +363,7 @@ validator record(utxo_ref: OutputReference) {
                       Some(o),
                       m_closing_account,
                       m_ref_script,
-                      next_index
+                      next_index,
                     )
                   } else if curr_index == closing_accounts_index {
                     return(
@@ -362,7 +371,7 @@ validator record(utxo_ref: OutputReference) {
                       m_closing_entry,
                       Some(o),
                       m_ref_script,
-                      next_index
+                      next_index,
                     )
                   } else if curr_index == closing_accounts_ref_script_index {
                     return(
@@ -370,23 +379,22 @@ validator record(utxo_ref: OutputReference) {
                       m_closing_entry,
                       m_closing_account,
                       Some(o),
-                      next_index
+                      next_index,
                     )
                   } else {
                     fail @"Invalid input index encountered"
                   }
                 }
-                _ -> {
+                _ ->
                   return(
                     m_prev_entry,
                     m_closing_entry,
                     m_closing_account,
                     m_ref_script,
-                    next_index
+                    next_index,
                   )
-                }
               }
-            }
+            },
           )
         // Only 4 UTxOs must be spent from the record script:
         // 1. Previous entry
@@ -420,19 +428,26 @@ validator record(utxo_ref: OutputReference) {
             reference_script: Some(_),
             ..
           },
-        ) = (
-          prev_entrys_output,
-          closing_entrys_output,
-          closing_accounts_output,
-          ref_scripts_output
-        )
+        ) =
+          (
+            prev_entrys_output,
+            closing_entrys_output,
+            closing_accounts_output,
+            ref_scripts_output,
+          )
 
         let (prev_entrys_policy, _prev_entrys_token_name, prev_entrys_qty) =
           utils.get_single_asset_from_value_apart_from_ada(prev_entrys_value)
         let (closing_entrys_policy, closing_username, closing_entrys_qty) =
           utils.get_single_asset_from_value_apart_from_ada(closing_entrys_value)
-        let (closing_accounts_policy, closing_accounts_token_name, closing_accounts_qty) =
-          utils.get_single_asset_from_value_apart_from_ada(closing_accounts_value)
+        let (
+          closing_accounts_policy,
+          closing_accounts_token_name,
+          closing_accounts_qty,
+        ) =
+          utils.get_single_asset_from_value_apart_from_ada(
+            closing_accounts_value,
+          )
         let (ref_scripts_policy, ref_scripts_token_name, ref_scripts_qty) =
           utils.get_single_asset_from_value_apart_from_ada(ref_scripts_value)
 
@@ -510,9 +525,9 @@ validator record(utxo_ref: OutputReference) {
           cont_prev_datum == prev_entrys_updated_datum,
           cont_prev_value == prev_entrys_value,
         }?
-        // }}}
       }
     }
+    // }}}
   }
 
   spend(
@@ -535,25 +550,14 @@ validator record(utxo_ref: OutputReference) {
       AuthorizedSpend { signature, accounts_input_index, intent } -> {
         expect Some(input_datum) = datum
 
-        expect Account {
-          pubkey,
-          salt,
-          ..
-        }: RecordDatum = input_datum
+        expect Account { pubkey, salt, .. }: RecordDatum = input_datum
 
         expect Output {
-          address: Address {
-            payment_credential: Script(own_script_hash),
-            ..
-          } as own_address,
+          address: Address { payment_credential: Script(own_script_hash), .. } as own_address,
           value: own_value,
           reference_script: None,
           ..
-        } = utils.get_own_input_at(
-          inputs,
-          own_out_ref,
-          accounts_input_index
-        )
+        } = utils.get_own_input_at(inputs, own_out_ref, accounts_input_index)
 
         let (accounts_policy, _username, accounts_qty) =
           utils.get_single_asset_from_value_apart_from_ada(own_value)
@@ -592,19 +596,19 @@ validator record(utxo_ref: OutputReference) {
           cont_latest_activity == utils.get_upper_bound(validity_range),
           when intent is {
             ProveActivity -> and {
-              cont_pubkey == pubkey,
-              cont_salt == salt,
-            }
+                cont_pubkey == pubkey,
+                cont_salt == salt,
+              }
             UpdatePubkey { signature_with_new_key } -> and {
-              !(cont_pubkey == pubkey),
-              cont_salt == cbor.serialise(own_out_ref),
-              utils.outputs_signed_by_ed25519_key(
-                cont_pubkey,
-                outputs,
-                signature_with_new_key,
-              ),
-            }
-          }
+                !(cont_pubkey == pubkey),
+                cont_salt == cbor.serialise(own_out_ref),
+                utils.outputs_signed_by_ed25519_key(
+                  cont_pubkey,
+                  outputs,
+                  signature_with_new_key,
+                ),
+              }
+          },
         }?
       }
     }

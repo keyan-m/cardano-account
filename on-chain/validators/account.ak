@@ -3,9 +3,7 @@ use aiken/crypto.{ScriptHash}
 use cardano/transaction.{
   Datum, InlineDatum, Input, Output, OutputReference, Transaction,
 }
-use cardano_account/types.{
-  Account, Contributor, Entry, RecordDatum,
-}
+use cardano_account/types.{Account, Contributor, Entry, RecordDatum}
 use cardano_account/utils as utils
 
 // === DATATYPES ===============================================================
@@ -53,7 +51,7 @@ validator account(record_script_hash: ScriptHash, username: ByteArray) {
         expect accounts_datum: RecordDatum = accounts_datum_data
 
         when accounts_datum is {
-          Account {..} -> True
+          Account { .. } -> True
           _ -> False
         }
       }

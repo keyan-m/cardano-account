@@ -5,9 +5,7 @@ use aiken/crypto.{ScriptHash, VerificationKeyHash}
 use aiken/interval.{Finite, Interval, IntervalBound}
 use cardano/address.{Address, Credential, Script}
 use cardano/assets.{AssetName, PolicyId, Value}
-use cardano/transaction.{
-  Input, Output, OutputReference, ValidityRange,
-}
+use cardano/transaction.{Input, Output, OutputReference, ValidityRange}
 use cardano_account/constants
 
 pub type PubKeyHash =
@@ -19,17 +17,12 @@ type Fold5<a, b, c, d, e, result> =
 fn do_fold5(
   self: List<x>,
   with: fn(x, a, b, c, d, e, Fold5<a, b, c, d, e, result>) -> result,
-  return: Fold5<a, b, c, d, e, result>
+  return: Fold5<a, b, c, d, e, result>,
 ) -> Fold5<a, b, c, d, e, result> {
   when self is {
     [] -> return
-    [x, ..xs] -> {
-      do_fold5(
-        xs,
-        with,
-        fn(a, b, c, d, e) { with(x, a, b, c, d, e, return) }
-      )
-    }
+    [x, ..xs] ->
+      do_fold5(xs, with, fn(a, b, c, d, e) { with(x, a, b, c, d, e, return) })
   }
 }
 
@@ -42,15 +35,9 @@ pub fn foldl5(
   zero_d: d,
   zero_e: e,
   with: fn(x, a, b, c, d, e, Fold5<a, b, c, d, e, result>) -> result,
-  return: Fold5<a, b, c, d, e, result>
+  return: Fold5<a, b, c, d, e, result>,
 ) -> result {
-  do_fold5(self, with, return)(
-    zero_a,
-    zero_b,
-    zero_c,
-    zero_d,
-    zero_e,
-  )
+  do_fold5(self, with, return)(zero_a, zero_b, zero_c, zero_d, zero_e)
 }
 
 // This functions assumes the "first" asset is ADA.
@@ -133,7 +120,7 @@ pub fn get_single_script_input(inputs: List<Input>) -> Input {
 
 pub fn keep_only_inputs_from_credential(
   inputs: List<Input>,
-  cred: Credential
+  cred: Credential,
 ) -> List<Input> {
   inputs |> list.filter(fn(i) { i.output.address.payment_credential == cred })
 }

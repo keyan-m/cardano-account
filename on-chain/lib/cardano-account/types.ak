@@ -6,15 +6,8 @@ pub type Contributor {
 }
 
 pub type RecordDatum {
-  Entry {
-    next_username: Option<ByteArray>,
-    contributor: Contributor,
-  }
-  Account {
-    pubkey: ByteArray,
-    salt: ByteArray,
-    latest_activity: Int,
-  }
+  Entry { next_username: Option<ByteArray>, contributor: Contributor }
+  Account { pubkey: ByteArray, salt: ByteArray, latest_activity: Int }
   DeployedScript
 }
 
