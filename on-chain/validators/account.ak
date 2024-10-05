@@ -1,15 +1,18 @@
 // === IMPORTS =================================================================
-use aiken/crypto.{ScriptHash}
+use aiken/collection/pairs
+use aiken/crypto.{ScriptHash, Signature}
 use cardano/transaction.{
-  Datum, InlineDatum, Input, Output, OutputReference, Transaction,
+  Datum, InlineDatum, Input, Output, OutputReference, Spend, Transaction,
 }
-use cardano_account/types.{Account, Contributor, Entry, RecordDatum}
+use cardano_account/types.{
+  Account, AuthorizedSpend, Contributor, Entry, RecordDatum, RecordSpendAction,
+}
 use cardano_account/utils as utils
 
 // === DATATYPES ===============================================================
-
 pub type AccountSpendAction {
   VerifySpentAccount { accounts_input_index: Int }
+  VerifyAuthority { accounts_reference_input_index: Int, signature: Signature }
   VerifyStaleness {
     accounts_reference_input_index: Int,
     record_entrys_reference_input_index: Int,
@@ -19,9 +22,10 @@ pub type AccountSpendAction {
 // === THE VALIDATOR ===========================================================
 validator account(record_script_hash: ScriptHash, username: ByteArray) {
   // Depending on the redeemer, it either validates account's authentication
-  // UTxO is spent (and subsequently the tx is signed by the stored ED25519
-  // key), or the account is stale and can be claimed (either by its original
-  // contributor, or enough time has passed that it's open for public claim).
+  // UTxO is spent/referred (and subsequently the tx is signed by the stored
+  // ED25519 key), or the account is stale and can be claimed (either by its
+  // original contributor, or enough time has passed that it's open for public
+  // claim).
   spend(
     _datum: Option<Datum>,
     action: AccountSpendAction,
@@ -31,6 +35,8 @@ validator account(record_script_hash: ScriptHash, username: ByteArray) {
     let Transaction {
       extra_signatories,
       inputs,
+      outputs,
+      redeemers,
       reference_inputs,
       validity_range,
       ..
@@ -38,7 +44,10 @@ validator account(record_script_hash: ScriptHash, username: ByteArray) {
 
     when action is {
       VerifySpentAccount { accounts_input_index } -> {
-        let account_input =
+        let Input {
+          output_reference: accounts_out_ref,
+          output: accounts_resolved_input,
+        } =
           utils.get_authentic_input_of_at(
             inputs,
             record_script_hash,
@@ -46,7 +55,13 @@ validator account(record_script_hash: ScriptHash, username: ByteArray) {
             accounts_input_index,
           )
 
-        expect InlineDatum(accounts_datum_data) = account_input.output.datum
+        expect Some(account_spend_redeemer_data) =
+          pairs.get_first(redeemers, Spend(accounts_out_ref))
+
+        expect AuthorizedSpend { .. }: RecordSpendAction =
+          account_spend_redeemer_data
+
+        expect InlineDatum(accounts_datum_data) = accounts_resolved_input.datum
 
         expect accounts_datum: RecordDatum = accounts_datum_data
 
@@ -54,6 +69,20 @@ validator account(record_script_hash: ScriptHash, username: ByteArray) {
           Account { .. } -> True
           _ -> False
         }
+      }
+      VerifyAuthority { accounts_reference_input_index, signature } -> {
+        expect Input {
+          output: Output { datum: InlineDatum(accounts_datum_data), .. },
+          ..
+        } =
+          utils.get_authentic_input_of_at(
+            reference_inputs,
+            record_script_hash,
+            username,
+            accounts_reference_input_index,
+          )
+        expect Account { pubkey, .. }: RecordDatum = accounts_datum_data
+        utils.outputs_signed_by_ed25519_key(pubkey, outputs, signature)?
       }
       VerifyStaleness {
         accounts_reference_input_index,

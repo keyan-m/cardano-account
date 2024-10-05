@@ -8,26 +8,11 @@ use cardano/transaction.{
   InlineDatum, Input, Output, OutputReference, Transaction,
 }
 use cardano_account/types.{
-  Account, CloseStaleAccount, Contributor, DeployedScript, Entry, InitiateRecord,
-  MintNewAccount, RecordDatum, RecordMintAction,
+  Account, AppendToNewAccount, AuthorizedSpend, CloseStaleAccount, Contributor,
+  DepleteAccount, DeployedScript, Entry, InitiateRecord, MintNewAccount,
+  ProveActivity, RecordDatum, RecordMintAction, RecordSpendAction, UpdatePubkey,
 } as types
 use cardano_account/utils as utils
-
-// === DATATYPES ===============================================================
-pub type RecordSpendAction {
-  AppendToNewAccount { input_index: Int }
-  DepleteAccount { input_index: Int }
-  AuthorizedSpend {
-    signature: ByteArray,
-    accounts_input_index: Int,
-    intent: Intent,
-  }
-}
-
-pub type Intent {
-  ProveActivity
-  UpdatePubkey { signature_with_new_key: ByteArray }
-}
 
 // === THE VALIDATOR ===========================================================
 validator record(utxo_ref: OutputReference) {

@@ -1,7 +1,7 @@
 use aiken/builtin
 use aiken/cbor
 use aiken/collection/list
-use aiken/crypto.{ScriptHash, VerificationKeyHash}
+use aiken/crypto.{ScriptHash, Signature, VerificationKeyHash}
 use aiken/interval.{Finite, Interval, IntervalBound}
 use cardano/address.{Address, Credential, Script}
 use cardano/assets.{AssetName, PolicyId, Value}
@@ -150,7 +150,7 @@ pub fn resolve_output_reference(
 pub fn outputs_signed_by_ed25519_key(
   verification_key: ByteArray,
   outputs: List<Output>,
-  signature: ByteArray,
+  signature: Signature,
 ) -> Bool {
   builtin.verify_ed25519_signature(
     verification_key,

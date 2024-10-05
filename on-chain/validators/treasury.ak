@@ -1,3 +1,4 @@
+// === IMPORTS =================================================================
 use aiken/collection/list
 use aiken/crypto.{ScriptHash}
 use cardano/address.{Address, Inline, Script}
@@ -7,6 +8,7 @@ use cardano/transaction.{
 use cardano_account/types.{Contributor, Entry, RecordDatum}
 use cardano_account/utils as utils
 
+// === THE VALIDATOR ===========================================================
 validator treasury(record_script_hash: ScriptHash) {
   spend(
     datum: Option<Contributor>,
