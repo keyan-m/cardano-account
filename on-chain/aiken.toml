@@ -1,7 +1,6 @@
 name = "keyan-m/cardano-account"
 version = "0.0.0"
-compiler = "v1.0.31-alpha"
-plutus = "v2"
+plutus = "v3"
 license = "Apache-2.0"
 description = "A wallet-less Cardano solution with usernames and passwords for a more convenient onboarding"
 
@@ -12,10 +11,10 @@ platform = "github"
 
 [[dependencies]]
 name = "aiken-lang/stdlib"
-version = "1.9.0"
+version = "v2.0.0"
 source = "github"
 
 [[dependencies]]
 name = "aiken-lang/fuzz"
-version = "v1"
+version = "v2"
 source = "github"

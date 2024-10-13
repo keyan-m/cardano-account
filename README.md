@@ -7,7 +7,7 @@
     * [Technical Details](#technical-details)
         * [Account Contract](#account-contract)
         * [Record Contract](#record-contract)
-        * [Support for Open Claim of Stale Accounts](#support-for-open-claim-of-stale-accounts)
+        * [Treasury](#treasury)
     * [User Experience](#user-experience)
         * [Account Creation](#account-creation)
         * [Deposits](#deposits)
@@ -24,22 +24,21 @@ password—similar to web2 conventions.
 
 ## How does it work?
 
-By allocating a UTxO for each username, withdrawals can be unlocked using an
-ED25519 signature, where its key pair is generated using a nonce stored in the
-datum (which comes from a spent UTxO in order to satisfy uniqueness and, to some
-extent, randomness).
+By storing each username in a linked list, along with a public key and a salt,
+each account can be uniquely identified, and a provided signature (ED25519) can
+be verified.
 
 The contract only verifies the signature and doesn't care about the underlying
 seed of the key pair. However, the following hash can be used as seed:
 ```
-[ nonce, [ raw_username ], [ raw_password ] ]
+[ salt, [ raw_username ], [ raw_password ] ]
 ```
 
 Where `,` has been used to notate concatenation, and `[ ]` indicates hashing.
 
 For the user to withdraw their funds, they should provide their username and
-password to the frontend provider, after which their account UTxO will be
-fetched, their account seed constructed, and their key pair generated.
+password to the frontend provider, after which their linked list entry UTxO will
+be fetched, their account seed constructed, and their key pair generated.
 
 Using the private key of this pair, users can now sign any withdrawal
 transactions.
@@ -55,28 +54,29 @@ experienced users.
 The `account` contract relies on the `record` contract, where all registered
 accounts are stored in order to guarantee uniqueness of usernames.
 
-`account` works by requiring its info UTxO to be spent, so that its latest
-activity field can be
-updated (see [Support for Open Claim of Stale Accounts](#support-for-open-claim-of-stale-accounts)). To
-allow multiple datum-less UTxOs to be spent with minimal execution budgets, this
-contract also supports reward withdrawals that, depending on whether the account
-is considered stale or not, will either look for the account UTxO in the inputs,
-or simply as a reference input.
+`account`'s spend endpoint is very minimal. It only validates a withdrawal is
+present in the transaction, invoking the script it is parameterized by.
+
+The staking script (parameterized by a username, and script hash of the contract
+responsible for managing the linked list), is also somewhat minimal: it works by
+requiring an account's info UTxO to be present in the transaction as a reference
+input, so that it can verify provided signatures against users' stored public
+keys.
+
+This design keeps transaction costs low for users, and also allows multiple
+UTxOs to be spent with minimal execution budgets.
 
 The "account UTxO" (meaning the UTxO carrying account's info), is authenticated
 by an NFT from the `record` validator, and a token name identical to
-the `username` parameter of the contract, prefixed with a single byte to
-distinguish it from the NFT stored in the linked list.
+the `username` parameter of the contract.
 
 Information stored in account UTxO's datum consist of:
 - User's ED25519 public key
-- The nonce that was presumably used to generate the key pair
-- Account's latest activity in POSIX milliseconds
+- The salt that was presumably used to generate the key pair
 ```rs
 type Account {
   pubkey: ByteArray,
-  nonce: ByteArray,
-  latest_activity: PosixTime,
+  salt: ByteArray,
 }
 ```
 
@@ -85,22 +85,14 @@ type Account {
 The purpose of this contract is to provide beacon NFTs for UTxOs, and also to
 keep track of registered usernames using a linked list to ensure uniqueness.
 
-### Support for Open Claim of Stale Accounts
+### Treasury
 
-The account datum carries a `latest_activity` field which has to be updated
-whenever the user wants to withdraw datum-less UTxOs (or update their public
-key).
+To allow free registrations, there is also a treasury contract where
+contributors can permanently lock their funds, which can later be used for new
+accounts.
 
-With a hardcoded 5-year period, if an account has been inactive for more than
-that, anyone will be free to:
-- Claim all the funds (i.e. datum-less UTxOs sitting at
-  user's `cardano-account` address)
-- Burn the NFTs and get ADA of account's UTxOs
-- De-register `account`'s staking script and claim its registration deposit
-
-Note that currently there is no prevention of claiming the account UTxO before
-claiming all funds in the contract. If NFTs are burnt first, remaining funds
-will be locked permanently.
+These funds will be marked with contributors' credentials so that they preserve
+staking rights, and therefore continue supporting the chain.
 
 ## User Experience
 
@@ -110,17 +102,16 @@ will be locked permanently.
 2. If the username is not already occupied (enforced by an on-chain linked
    list), the platform builds the transaction that consumes the previous
    link/UTxO in the list
-3. It uses the output reference of link's UTxO as nonce, concatenates it to the
+3. It uses the output reference of link's UTxO as salt, concatenates it to the
    hashes of the provided raw username and raw password, and hashes the result
 4. It uses this hash as the seed for generating an ED25519 key pair
-5. Store the nonce alongside the verification/public key of the generated pair
+5. Store the salt alongside the verification/public key of the generated pair
 6. With the outputs of the transaction now determined, the platform uses the
    acquired private key to sign the outputs, and provide it as the redeemer
 7. Submit the transaction
 
-Here it's assumed the platform that's providing this service also provides the
-required fee, minimum required ADA for both the account UTxO and list entry
-UTxO, and also collateral UTxO(s).
+All the required funds (transaction fee, minimum required ADA for beacon UTxOs
+and deployed scripts) are provided by the treasury.
 
 ### Deposits
 
@@ -135,10 +126,9 @@ share it with others.
 
 1. User types in their username and password, and the funds they want to
    withdraw
-2. System hashes the raw username, drops its first byte (since the first byte
-   is used to distinguish the list entry's and account's token names), and looks
-   to find the UTxO which stores an NFT with this token name
-3. The platform uses the stored nonce, along with username and password of the
+2. System hashes the raw username, and looks to find the UTxO which stores an
+   NFT with this token name
+3. The platform uses the stored salt, along with username and password of the
    user to generate the ED25519 key pair
 4. Builds the transaction with proper outputs
 5. Using user's private key, signs the outputs of this transaction
@@ -147,8 +137,5 @@ share it with others.
 
 ## Disclaimer
 
-In its current form, this is primarily intended as a proof of concept and not
-meant to be used in production.
-
-Plutus V3 is also not yet supported, and handling of datum-less UTxOs is
-emulated by defining `AccountDatum` as a sum type.
+This is currently a prototype, and it's primarily intended as a proof of
+concept.
