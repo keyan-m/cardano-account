@@ -8,14 +8,14 @@ pub type Contributor {
 
 pub type RecordDatum {
   Entry { next_username: Option<ByteArray>, contributor: Contributor }
-  Account { pubkey: ByteArray, salt: ByteArray, m_latest_activity: Option<Int> }
+  Account { pubkey: ByteArray, salt: ByteArray }
   DeployedScript
 }
 
 pub type RecordMintAction {
   InitiateRecord
   MintNewAccount { username: ByteArray, signature: Signature }
-  CloseStaleAccount {
+  BurnAccount {
     prev_entrys_index: Int,
     closing_entrys_index: Int,
     closing_accounts_index: Int,
@@ -25,7 +25,7 @@ pub type RecordMintAction {
 
 pub type RecordSpendAction {
   AppendToNewAccount { input_index: Int }
-  DepleteAccount { input_index: Int }
+  CloseAccount
   AuthorizedSpend {
     signature: Signature,
     accounts_input_index: Int,
@@ -34,6 +34,5 @@ pub type RecordSpendAction {
 }
 
 pub type Intent {
-  ProveActivity
   UpdatePubkey { signature_with_new_key: Signature }
 }
