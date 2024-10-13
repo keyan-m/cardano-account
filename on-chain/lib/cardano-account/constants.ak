@@ -9,12 +9,12 @@ pub const accounts_token_name_byte_value = 1
 
 pub const accounts_token_name_byte = #"01"
 
-// 5 years of inactivity allowed, after which the contributor who had provided
-// the initial required funds for creating an acount can deplete the account,
-// and burn the NFTs.
+// 1 year / 366 days of inactivity allowed, after which the contributor who had
+// provided the initial required funds for creating an acount can deplete the
+// account, and burn the NFTs.
 pub const allowed_inactivity_period_before_contributor_can_claim =
-  157_800_000_000_000
+  31_622_400_000
 
-// 6 years of inactivity allowed, after which anyone can claim all funds of an
+// 2 years of inactivity allowed, after which anyone can claim all funds of an
 // account and burn its beacon NFTs.
-pub const allowed_inactivity_period_before_open_claim = 189_300_000_000_000
+pub const allowed_inactivity_period_before_open_claim = 63_244_800_000

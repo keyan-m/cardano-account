@@ -8,7 +8,7 @@ pub type Contributor {
 
 pub type RecordDatum {
   Entry { next_username: Option<ByteArray>, contributor: Contributor }
-  Account { pubkey: ByteArray, salt: ByteArray, latest_activity: Int }
+  Account { pubkey: ByteArray, salt: ByteArray, m_latest_activity: Option<Int> }
   DeployedScript
 }
 

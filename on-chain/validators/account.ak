@@ -33,11 +33,12 @@ validator account_minimal(
   username: ByteArray,
 ) {
   // Minimal validation that only checks to see if its authentic corresponding
-  // account UTxO is referred to, so that it can verfify user's signature.
+  // account UTxO is referred to, so that it can verfify the provided signature.
   //
-  // However, if user wants to update their `latest_activity`, they'll need to
-  // spend their account UTxO. This verification is delegated to the
-  // `extra_observer_script` in order to keep regular costs down for users.
+  // However, if users want to update their `m_latest_activity`, or update their
+  // public key hashes, they'll need to spend their account UTxOs. This
+  // verification is delegated to the `extra_observer_script` in order to keep
+  // regular costs down for users.
   spend(
     _datum: Option<Datum>,
     action: AccountSpendAction,
@@ -142,8 +143,10 @@ validator account_extra(record_script_hash: ScriptHash, username: ByteArray) {
           )
 
         // Closing account must be considered stale.
-        expect Account { latest_activity, .. }: RecordDatum =
-          accounts_datum_data
+        expect Account {
+          m_latest_activity: Some(latest_activity),
+          ..
+        }: RecordDatum = accounts_datum_data
         expect Entry {
           contributor: Contributor {
             verification_key_hash: entrys_contributor,

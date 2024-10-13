@@ -122,11 +122,11 @@ validator record(utxo_ref: OutputReference) {
         expect (bytearray.length(username) == 32)?
 
         // Exactly one asset must be minted for `username`, with a quantity of
-        // three. No need to validate the minted asset's policy.
+        // four. No need to validate the minted asset's policy.
         expect [(_, mint_name, mint_qty)] = assets.flatten(mint)
         expect and {
             mint_name == username,
-            mint_qty == 3,
+            mint_qty == 4,
           }?
 
         // Only 1 UTxO must be spent from the script address.
@@ -171,15 +171,16 @@ validator record(utxo_ref: OutputReference) {
               bytearray.compare(username, prev_next_user) == Less
           }?
 
-        // Four outputs are expected to be produced at the script address:
+        // Five outputs are expected to be produced at the script address:
         // 1. Updated previous entry input
         // 2. New entry
         // 3. User's account UTxO
         // 4. User's account reference script
+        // 5. User's account extra observer reference script
         //
         // Here we don't care about the staking parts. However, if the funds are
         // being provided by the `treasury` contract, it'll stipulate that the
-        // staking parts of all 3 new UTxOs (since the first one is just getting
+        // staking parts of all 4 new UTxOs (since the first one is just getting
         // an updated datum) match the contributor's.
         expect [
           Output {
@@ -215,6 +216,15 @@ validator record(utxo_ref: OutputReference) {
             datum: InlineDatum(o3_datum_data),
             reference_script: Some(_),
           },
+          Output {
+            address: Address {
+              payment_credential: Script(o4_pay_cred_hash),
+              ..
+            },
+            value: o4_value,
+            datum: InlineDatum(o4_datum_data),
+            reference_script: Some(_),
+          },
           ..
         ] = outputs
 
@@ -232,11 +242,8 @@ validator record(utxo_ref: OutputReference) {
           entrys_output_asset_quantity,
         ) = utils.get_single_asset_from_value_apart_from_ada(o1_value)
 
-        expect Account {
-          pubkey: specified_pubkey,
-          salt: specified_salt,
-          latest_activity: specified_latest_activity,
-        }: RecordDatum = o2_datum_data
+        expect Account { pubkey: specified_pubkey, salt: specified_salt, .. }: RecordDatum =
+          o2_datum_data
         let (
           accounts_output_asset_policy,
           accounts_output_asset_name,
@@ -250,28 +257,44 @@ validator record(utxo_ref: OutputReference) {
           accounts_script_asset_quantity,
         ) = utils.get_single_asset_from_value_apart_from_ada(o3_value)
 
+        expect DeployedScript: RecordDatum = o4_datum_data
+        let (
+          accounts_extra_observer_script_asset_policy,
+          accounts_extra_observer_script_asset_name,
+          accounts_extra_observer_script_asset_quantity,
+        ) = utils.get_single_asset_from_value_apart_from_ada(o4_value)
+
         and {
-          // Address validations
+          // --- Address validations -------------------------------------------
           o0_address == prev_entrys_address,
           o1_pay_cred_hash == own_policy,
           o2_pay_cred_hash == own_policy,
           o3_pay_cred_hash == own_policy,
-          // Value validations
+          o4_pay_cred_hash == own_policy,
+
+          // --- Value validations ---------------------------------------------
           updated_prev_entrys_beacon == prev_entrys_beacon,
+          //
           entrys_output_asset_policy == own_policy,
           entrys_output_asset_name == username,
           entrys_output_asset_quantity == 1,
+          //
           accounts_output_asset_policy == own_policy,
           accounts_output_asset_name == username,
           accounts_output_asset_quantity == 1,
+          //
           accounts_script_asset_policy == own_policy,
           accounts_script_asset_name == username,
           accounts_script_asset_quantity == 1,
-          // Datum validations
+          //
+          accounts_extra_observer_script_asset_policy == own_policy,
+          accounts_extra_observer_script_asset_name == username,
+          accounts_extra_observer_script_asset_quantity == 1,
+
+          // --- Datum validations ---------------------------------------------
           o0_datum == InlineDatum(updated_datum),
           entrys_next_username == prev_entrys_next_username,
           specified_salt == cbor.serialise(own_out_ref),
-          specified_latest_activity == utils.get_upper_bound(validity_range),
           utils.outputs_signed_by_ed25519_key(
             specified_pubkey,
             outputs,
@@ -287,9 +310,10 @@ validator record(utxo_ref: OutputReference) {
         closing_accounts_ref_script_index,
       } -> {
         // {{{
-        // Accounts older than 6 years are up for grabs (it'll be 5 years for
+        // Accounts older than 2 years are up for grabs (it'll be 1 year for
         // the contributor). This is meant as a measure to prevent permanent
-        // locking of funds and unavailability of an unused username.
+        // locking of funds and unavailability of an unused username for free
+        // accounts..
         // 1. Three UTxOs are expected to be spent such that one of them points
         //    to the closing account's username, and the other three are closing
         //    account's entry, "info," and reference script UTxOs
@@ -470,24 +494,13 @@ validator record(utxo_ref: OutputReference) {
           }
 
         // Exactly one asset must be burnt for `closing_username`, with a
-        // quantity of -3. Here too there is no need to validate the burnt
+        // quantity of -4. Here too there is no need to validate the burnt
         // asset's policy.
         expect [(_, burn_username, burn_qty)] = assets.flatten(mint)
         expect and {
             burn_username == closing_username,
-            burn_qty == -3,
+            burn_qty == -4,
           }?
-
-        // Closing account must be considered stale.
-        expect Account { latest_activity, .. }: RecordDatum =
-          closing_accounts_datum
-        expect
-          utils.account_is_stale(
-            latest_activity,
-            closing_entrys_contributor,
-            extra_signatories,
-            validity_range,
-          )?
 
         expect DeployedScript: RecordDatum = ref_scripts_datum
 
@@ -502,13 +515,27 @@ validator record(utxo_ref: OutputReference) {
           ..
         ] = outputs
 
+        expect Account { m_latest_activity, .. }: RecordDatum =
+          closing_accounts_datum
+
         // Previous entry in the list is reproduced unchanged, except for its
         // datum, which must point to the closing entry's (potential) next
         // username.
         and {
           cont_prev_address == prev_entrys_address,
           cont_prev_datum == prev_entrys_updated_datum,
+          // If it's a free account, it must be considered stale.
           cont_prev_value == prev_entrys_value,
+          when m_latest_activity is {
+            None -> True
+            Some(latest_activity) ->
+              utils.account_is_stale(
+                latest_activity,
+                closing_entrys_contributor,
+                extra_signatories,
+                validity_range,
+              )
+          },
         }?
       }
     }
@@ -527,15 +554,16 @@ validator record(utxo_ref: OutputReference) {
       AppendToNewAccount { input_index } ->
         // This only needs to make sure the minting endpoint is invoked with a
         // single asset of own script hash.
-        validate_mint(input_index, 3, own_out_ref, inputs, mint)?
+        validate_mint(input_index, 4, own_out_ref, inputs, mint)?
       DepleteAccount { input_index } ->
         // This only needs to make sure the minting endpoint is invoked with a
         // single asset of own script hash.
-        validate_mint(input_index, -3, own_out_ref, inputs, mint)?
+        validate_mint(input_index, -4, own_out_ref, inputs, mint)?
       AuthorizedSpend { signature, accounts_input_index, intent } -> {
         expect Some(input_datum) = datum
 
-        expect Account { pubkey, salt, .. }: RecordDatum = input_datum
+        expect Account { pubkey, salt, m_latest_activity }: RecordDatum =
+          input_datum
 
         expect Output {
           address: Address { payment_credential: Script(own_script_hash), .. } as own_address,
@@ -560,7 +588,7 @@ validator record(utxo_ref: OutputReference) {
         expect Account {
           pubkey: cont_pubkey,
           salt: cont_salt,
-          latest_activity: cont_latest_activity,
+          m_latest_activity: cont_m_latest_activity,
         }: RecordDatum = cont_datum_data
 
         // 1. Input account UTxO must be authentic
@@ -568,7 +596,7 @@ validator record(utxo_ref: OutputReference) {
         // 3. Account UTxO must go back to the script
         // 4. Account's value must remain unchanged (this is fine as the
         //    datum size won't change)
-        // 5. `latest_activity` must be updated
+        // 5. `m_latest_activity` must be properly reproduced
         // 6. If the intent is to just prove activity, `pubkey` and `salt` must
         //    remain unchanged, otherwise they both need to be updated, and the
         //    outputs must also be signed by the new `pubkey`
@@ -578,7 +606,13 @@ validator record(utxo_ref: OutputReference) {
           utils.outputs_signed_by_ed25519_key(pubkey, outputs, signature),
           cont_address == own_address,
           cont_value == own_value,
-          cont_latest_activity == utils.get_upper_bound(validity_range),
+          when m_latest_activity is {
+            None -> True
+            Some(_) ->
+              cont_m_latest_activity == Some(
+                utils.get_upper_bound(validity_range),
+              )
+          },
           when intent is {
             ProveActivity -> and {
                 cont_pubkey == pubkey,

@@ -5,7 +5,7 @@ use cardano/address.{Address, Inline, Script}
 use cardano/transaction.{
   InlineDatum, Input, Output, OutputReference, Transaction,
 }
-use cardano_account/types.{Contributor, Entry, RecordDatum}
+use cardano_account/types.{Account, Contributor, Entry, RecordDatum}
 use cardano_account/utils as utils
 
 // === THE VALIDATOR ===========================================================
@@ -19,7 +19,7 @@ validator treasury(record_script_hash: ScriptHash) {
     expect Some(contributor) = datum
     let Contributor(_, contributors_stake_credential) = contributor
 
-    let Transaction { inputs, outputs, mint, .. } = tx
+    let Transaction { inputs, outputs, mint, validity_range, .. } = tx
 
     // `record` contract's `MintNewAccount` must be the invoked endpoint. Note
     // the mint quantity of 3 implies this (and therefore it must remain in
@@ -57,6 +57,7 @@ validator treasury(record_script_hash: ScriptHash) {
           stake_credential: Some(Inline(users_account_stake_credential)),
           ..
         },
+        datum: InlineDatum(new_accounts_datum_data),
         ..
       },
       Output {
@@ -70,6 +71,11 @@ validator treasury(record_script_hash: ScriptHash) {
     ] = outputs
     expect Entry { contributor: new_entrys_contributor, .. }: RecordDatum =
       new_entrys_datum_data
+    expect Account {
+      m_latest_activity: Some(specified_latest_activity),
+      .. 
+    }: RecordDatum =
+      new_accounts_datum_data
     and {
       // Staking parts of the 3 newly produced UTxOs must match that of
       // contributor's
@@ -78,6 +84,8 @@ validator treasury(record_script_hash: ScriptHash) {
       ref_scripts_stake_credential == contributors_stake_credential,
       // Contributor must be stored in record entry's datum
       new_entrys_contributor == contributor,
+      // Treasury only allows for expirable accounts to be created
+      specified_latest_activity == utils.get_upper_bound(validity_range),
     }?
   }
 
