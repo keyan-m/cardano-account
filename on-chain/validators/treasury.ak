@@ -1,3 +1,9 @@
+//// ## Treasury Validator – Funding Source for Deployment Costs
+////
+//// This contract allows a single UTxO to be spent for each new account. One
+//// other requirement is that all newly created UTxOs must have staking parts
+//// that match that of the UTxO's contributor (store in datum).
+
 // === IMPORTS =================================================================
 use aiken/collection/list
 use aiken/crypto.{ScriptHash}
@@ -5,7 +11,7 @@ use cardano/address.{Address, Inline, Script}
 use cardano/transaction.{
   InlineDatum, Input, Output, OutputReference, Transaction,
 }
-use cardano_account/types.{Account, Contributor, Entry, RecordDatum}
+use cardano_account/types.{Contributor, Entry, RecordDatum}
 use cardano_account/utils as utils
 
 // === THE VALIDATOR ===========================================================
@@ -19,13 +25,13 @@ validator treasury(record_script_hash: ScriptHash) {
     expect Some(contributor) = datum
     let Contributor(_, contributors_stake_credential) = contributor
 
-    let Transaction { inputs, outputs, mint, validity_range, .. } = tx
+    let Transaction { inputs, outputs, mint, .. } = tx
 
     // `record` contract's `MintNewAccount` must be the invoked endpoint. Note
-    // the mint quantity of 3 implies this (and therefore it must remain in
+    // the mint quantity of 4 implies this (and therefore it must remain in
     // sync!).
     let mint_qty = utils.get_single_mint_quantity_of(mint, record_script_hash)
-    expect (mint_qty == 3)?
+    expect (mint_qty == 4)?
 
     // Apart from UTxOs spent from `record` script, only one script UTxO is
     // expected to be spent, which will be from this `treasury` contract.
@@ -42,6 +48,7 @@ validator treasury(record_script_hash: ScriptHash) {
     // 2. New entry
     // 3. User's account UTxO
     // 4. User's account reference script
+    // 5. User's staking reference script
     expect [
       _updated_previous_entrys_utxo,
       Output {
@@ -57,12 +64,18 @@ validator treasury(record_script_hash: ScriptHash) {
           stake_credential: Some(Inline(users_account_stake_credential)),
           ..
         },
-        datum: InlineDatum(new_accounts_datum_data),
         ..
       },
       Output {
         address: Address {
-          stake_credential: Some(Inline(ref_scripts_stake_credential)),
+          stake_credential: Some(Inline(spending_ref_script_stake_credential)),
+          ..
+        },
+        ..
+      },
+      Output {
+        address: Address {
+          stake_credential: Some(Inline(staking_ref_script_stake_credential)),
           ..
         },
         ..
@@ -71,21 +84,15 @@ validator treasury(record_script_hash: ScriptHash) {
     ] = outputs
     expect Entry { contributor: new_entrys_contributor, .. }: RecordDatum =
       new_entrys_datum_data
-    expect Account {
-      m_latest_activity: Some(specified_latest_activity),
-      .. 
-    }: RecordDatum =
-      new_accounts_datum_data
     and {
-      // Staking parts of the 3 newly produced UTxOs must match that of
+      // Staking parts of the 4 newly produced UTxOs must match that of
       // contributor's
       new_entrys_stake_credential == contributors_stake_credential,
       users_account_stake_credential == contributors_stake_credential,
-      ref_scripts_stake_credential == contributors_stake_credential,
+      spending_ref_script_stake_credential == contributors_stake_credential,
+      staking_ref_script_stake_credential == contributors_stake_credential,
       // Contributor must be stored in record entry's datum
       new_entrys_contributor == contributor,
-      // Treasury only allows for expirable accounts to be created
-      specified_latest_activity == utils.get_upper_bound(validity_range),
     }?
   }
 

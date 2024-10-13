@@ -1,14 +1,24 @@
+//// ## Account Validator – User Wallet
+////
+//// The spending contract is a minimal logic for validating a provided
+//// signature by looking up the public key hash in account's corresponding UTxO
+//// stored at the linked list's (record's) contract.
+////
+//// The staking part (WIP) will be responsible for reward withdrawals and
+//// delegations.
+
 // === IMPORTS =================================================================
 use aiken/collection/pairs
 use aiken/crypto.{ScriptHash, Signature}
 use cardano/address.{Credential}
+use cardano/assets.{Value}
 use cardano/certificate.{Certificate, RegisterCredential, UnregisterCredential}
 use cardano/transaction.{
   Datum, InlineDatum, Input, Output, OutputReference, Redeemer, Spend,
-  Transaction, Withdraw,
+  Transaction,
 }
 use cardano_account/types.{
-  Account, AuthorizedSpend, Contributor, Entry, RecordDatum, RecordSpendAction,
+  Account, AuthorizedSpend, RecordDatum, RecordSpendAction,
 }
 use cardano_account/utils as utils
 
@@ -20,14 +30,11 @@ pub type AccountSpendAction {
 
 pub type AccountStakeAction {
   VerifySpentAccount { accounts_input_index: Int }
-  VerifyStaleness {
-    accounts_reference_input_index: Int,
-    record_entrys_reference_input_index: Int,
-  }
+  VerifySignature { accounts_reference_input_index: Int, signature: Signature }
 }
 
 // === VALIDATORS ==============================================================
-validator account_minimal(
+validator account_spend(
   extra_observer_script: Credential,
   record_script_hash: ScriptHash,
   username: ByteArray,
@@ -35,10 +42,8 @@ validator account_minimal(
   // Minimal validation that only checks to see if its authentic corresponding
   // account UTxO is referred to, so that it can verfify the provided signature.
   //
-  // However, if users want to update their `m_latest_activity`, or update their
-  // public key hashes, they'll need to spend their account UTxOs. This
-  // verification is delegated to the `extra_observer_script` in order to keep
-  // regular costs down for users.
+  // `extra_observer_script` is an additional script for validating more
+  // advanced signatures.
   spend(
     _datum: Option<Datum>,
     action: AccountSpendAction,
@@ -48,18 +53,14 @@ validator account_minimal(
     let Transaction { outputs, reference_inputs, withdrawals, .. } = tx
     when action is {
       VerifyAuthority { accounts_reference_input_index, signature } -> {
-        expect Input {
-          output: Output { datum: InlineDatum(accounts_datum_data), .. },
-          ..
-        } =
-          utils.get_authentic_input_of_at(
-            reference_inputs,
-            record_script_hash,
-            username,
-            accounts_reference_input_index,
-          )
-        expect Account { pubkey, .. }: RecordDatum = accounts_datum_data
-        utils.outputs_signed_by_ed25519_key(pubkey, outputs, signature)?
+        verify_signature_from_reference_inputs(
+          outputs,
+          reference_inputs,
+          record_script_hash,
+          username,
+          accounts_reference_input_index,
+          signature,
+        )
       }
       VerifyExtraObserved ->
         when pairs.get_first(withdrawals, extra_observer_script) is {
@@ -74,33 +75,29 @@ validator account_minimal(
   }
 }
 
-validator account_extra(record_script_hash: ScriptHash, username: ByteArray) {
-  // Depending on the redeemer, it either validates account's authentication
-  // UTxO is spent/referred (and subsequently the tx is signed by the stored
-  // ED25519 key), or the account is stale and can be claimed (either by its
-  // original contributor, or enough time has passed that it's open for public
-  // claim).
+validator account_staking(record_script_hash: ScriptHash, username: ByteArray) {
+  // This validates account's authentication UTxO is spent (and subsequently the
+  // tx is signed by the stored ED25519 key).
   withdraw(action: AccountStakeAction, _own_cred: Credential, tx: Transaction) {
     let Transaction {
-      extra_signatories,
       inputs,
+      outputs,
       redeemers,
       reference_inputs,
-      validity_range,
       ..
     } = tx
     when action is {
+      // For withdrawing while changing pubkey.
       VerifySpentAccount { accounts_input_index } -> {
         let Input {
           output_reference: accounts_out_ref,
           output: accounts_resolved_input,
-        } =
-          utils.get_authentic_input_of_at(
-            inputs,
-            record_script_hash,
-            username,
-            accounts_input_index,
-          )
+        } = utils.get_authentic_input_of_at(
+          inputs,
+          record_script_hash,
+          username,
+          accounts_input_index,
+        )
 
         expect Some(account_spend_redeemer_data) =
           pairs.get_first(redeemers, Spend(accounts_out_ref))
@@ -117,64 +114,26 @@ validator account_extra(record_script_hash: ScriptHash, username: ByteArray) {
           _ -> False
         }
       }
-      VerifyStaleness {
-        accounts_reference_input_index,
-        record_entrys_reference_input_index,
-      } -> {
-        expect Input {
-          output: Output { datum: InlineDatum(accounts_datum_data), .. },
-          ..
-        } =
-          utils.get_authentic_input_of_at(
-            reference_inputs,
-            record_script_hash,
-            username,
-            accounts_reference_input_index,
-          )
-        expect Input {
-          output: Output { datum: InlineDatum(entrys_datum_data), .. },
-          ..
-        } =
-          utils.get_authentic_input_of_at(
-            reference_inputs,
-            record_script_hash,
-            username,
-            record_entrys_reference_input_index,
-          )
-
-        // Closing account must be considered stale.
-        expect Account {
-          m_latest_activity: Some(latest_activity),
-          ..
-        }: RecordDatum = accounts_datum_data
-        expect Entry {
-          contributor: Contributor {
-            verification_key_hash: entrys_contributor,
-            ..
-          },
-          ..
-        }: RecordDatum = entrys_datum_data
-        utils.account_is_stale(
-          latest_activity,
-          entrys_contributor,
-          extra_signatories,
-          validity_range,
-        )?
+      VerifySignature { accounts_reference_input_index, signature } -> {
+        verify_signature_from_reference_inputs(
+          outputs,
+          reference_inputs,
+          record_script_hash,
+          username,
+          accounts_reference_input_index,
+          signature,
+        )
       }
     }
   }
 
   publish(_action: Redeemer, certificate: Certificate, tx: Transaction) {
     when certificate is {
+      // Anyone can register
       RegisterCredential { .. } -> True
-      UnregisterCredential { credential: own_cred, .. } -> {
-        expect [withdraw_redeemer_data] =
-          pairs.get_all(tx.redeemers, Withdraw(own_cred))
-        expect withdraw_redeemer: AccountStakeAction = withdraw_redeemer_data
-        when withdraw_redeemer is {
-          VerifyStaleness { .. } -> True
-          _ -> False
-        }
+      // Unregistration can only happen when closing an account
+      UnregisterCredential { .. } -> {
+        validate_mint(tx.mint, record_script_hash, username, -4)?
       }
       _ -> False
     }
@@ -182,5 +141,41 @@ validator account_extra(record_script_hash: ScriptHash, username: ByteArray) {
 
   else(_) {
     fail
+  }
+}
+
+fn verify_signature_from_reference_inputs(
+  outputs: List<Output>,
+  reference_inputs: List<Input>,
+  record_script_hash: ScriptHash,
+  username: ByteArray,
+  accounts_reference_input_index: Int,
+  signature: Signature,
+) -> Bool {
+  expect Input {
+    output: Output { datum: InlineDatum(accounts_datum_data), .. },
+    ..
+  } =
+    utils.get_authentic_input_of_at(
+      reference_inputs,
+      record_script_hash,
+      username,
+      accounts_reference_input_index,
+    )
+  expect Account { pubkey, .. }: RecordDatum = accounts_datum_data
+  utils.outputs_signed_by_ed25519_key(pubkey, outputs, signature)
+}
+
+fn validate_mint(
+  mint: Value,
+  record_script_hash: ScriptHash,
+  username: ByteArray,
+  expected_mint_quantity: Int,
+) -> Bool {
+  expect [(mint_policy, mint_name, mint_qty)] = mint |> assets.flatten
+  and {
+    mint_policy == record_script_hash,
+    mint_name == username,
+    mint_qty == expected_mint_quantity,
   }
 }
