@@ -36,7 +36,7 @@ validator treasury(record_script_hash: ScriptHash) {
     // Apart from UTxOs spent from `record` script, only one script UTxO is
     // expected to be spent, which will be from this `treasury` contract.
     let records_script = Script(record_script_hash)
-    expect [_] =
+    expect [Input { output: Output { address: treasury_address, .. }, .. }] =
       list.filter(
         inputs,
         fn(i) { !(i.output.address.payment_credential == records_script) },
@@ -82,8 +82,11 @@ validator treasury(record_script_hash: ScriptHash) {
       },
       ..
     ] = outputs
-    expect Entry { contributor: new_entrys_contributor, .. }: RecordDatum =
-      new_entrys_datum_data
+    expect Entry {
+      contributor: new_entrys_contributor,
+      treasury_address: new_entrys_treasury_address,
+      ..
+    }: RecordDatum = new_entrys_datum_data
     and {
       // Staking parts of the 4 newly produced UTxOs must match that of
       // contributor's
@@ -93,6 +96,8 @@ validator treasury(record_script_hash: ScriptHash) {
       staking_ref_script_stake_credential == contributors_stake_credential,
       // Contributor must be stored in record entry's datum
       new_entrys_contributor == contributor,
+      // This treausry's address must also be correctly stored.
+      new_entrys_treasury_address == treasury_address,
     }?
   }
 

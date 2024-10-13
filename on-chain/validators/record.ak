@@ -5,12 +5,12 @@ use aiken/primitive/bytearray
 use cardano/address.{Address, Script}
 use cardano/assets.{PolicyId, Value}
 use cardano/transaction.{
-  InlineDatum, Input, Output, OutputReference, Transaction,
+  InlineDatum, Input, NoDatum, Output, OutputReference, Transaction,
 }
 use cardano_account/types.{
   Account, AppendToNewAccount, AuthorizedSpend, CloseStaleAccount, Contributor,
-  DepleteAccount, DeployedScript, Entry, InitiateRecord, MintNewAccount,
-  ProveActivity, RecordDatum, RecordMintAction, RecordSpendAction, UpdatePubkey,
+  DepleteAccount, Entry, InitiateRecord, MintNewAccount, ProveActivity,
+  RecordDatum, RecordMintAction, RecordSpendAction, UpdatePubkey,
 } as types
 use cardano_account/utils as utils
 
@@ -73,7 +73,8 @@ validator record(utxo_ref: OutputReference) {
           ..
         ] = outputs
 
-        // Linked list must be empty at initiation.
+        // Linked list must be empty at initiation. Other fields can be
+        // arbitrarily set.
         expect Entry { next_username: None, .. } = list_head_datum_data
 
         // Proper datum must be attached to the reference script's UTxO.
@@ -155,11 +156,13 @@ validator record(utxo_ref: OutputReference) {
         expect Entry {
           next_username: prev_entrys_next_username,
           contributor: prev_entrys_contributor,
+          treasury_address: prev_entrys_treasury_address,
         }: RecordDatum = prev_entry_data
         let updated_datum =
           Entry {
             next_username: Some(username),
             contributor: prev_entrys_contributor,
+            treasury_address: prev_entrys_treasury_address,
           }
 
         // New username must be smaller than a potential next user. Note that
@@ -176,7 +179,7 @@ validator record(utxo_ref: OutputReference) {
         // 2. New entry
         // 3. User's account UTxO
         // 4. User's account reference script
-        // 5. User's account extra observer reference script
+        // 5. User's staking reference script
         //
         // Here we don't care about the staking parts. However, if the funds are
         // being provided by the `treasury` contract, it'll stipulate that the
@@ -213,7 +216,7 @@ validator record(utxo_ref: OutputReference) {
               ..
             },
             value: o3_value,
-            datum: InlineDatum(o3_datum_data),
+            datum: NoDatum,
             reference_script: Some(_),
           },
           Output {
@@ -222,7 +225,7 @@ validator record(utxo_ref: OutputReference) {
               ..
             },
             value: o4_value,
-            datum: InlineDatum(o4_datum_data),
+            datum: NoDatum,
             reference_script: Some(_),
           },
           ..
@@ -250,18 +253,16 @@ validator record(utxo_ref: OutputReference) {
           accounts_output_asset_quantity,
         ) = utils.get_single_asset_from_value_apart_from_ada(o2_value)
 
-        expect DeployedScript: RecordDatum = o3_datum_data
         let (
           accounts_script_asset_policy,
           accounts_script_asset_name,
           accounts_script_asset_quantity,
         ) = utils.get_single_asset_from_value_apart_from_ada(o3_value)
 
-        expect DeployedScript: RecordDatum = o4_datum_data
         let (
-          accounts_extra_observer_script_asset_policy,
-          accounts_extra_observer_script_asset_name,
-          accounts_extra_observer_script_asset_quantity,
+          accounts_staking_script_asset_policy,
+          accounts_staking_script_asset_name,
+          accounts_staking_script_asset_quantity,
         ) = utils.get_single_asset_from_value_apart_from_ada(o4_value)
 
         and {
@@ -271,7 +272,6 @@ validator record(utxo_ref: OutputReference) {
           o2_pay_cred_hash == own_policy,
           o3_pay_cred_hash == own_policy,
           o4_pay_cred_hash == own_policy,
-
           // --- Value validations ---------------------------------------------
           updated_prev_entrys_beacon == prev_entrys_beacon,
           //
@@ -287,10 +287,9 @@ validator record(utxo_ref: OutputReference) {
           accounts_script_asset_name == username,
           accounts_script_asset_quantity == 1,
           //
-          accounts_extra_observer_script_asset_policy == own_policy,
-          accounts_extra_observer_script_asset_name == username,
-          accounts_extra_observer_script_asset_quantity == 1,
-
+          accounts_staking_script_asset_policy == own_policy,
+          accounts_staking_script_asset_name == username,
+          accounts_staking_script_asset_quantity == 1,
           // --- Datum validations ---------------------------------------------
           o0_datum == InlineDatum(updated_datum),
           entrys_next_username == prev_entrys_next_username,
@@ -303,21 +302,22 @@ validator record(utxo_ref: OutputReference) {
         }?
       }
       // }}}
-      CloseStaleAccount {
+      BurnAccount {
+        signature,
         prev_entrys_index,
         closing_entrys_index,
         closing_accounts_index,
         closing_accounts_ref_script_index,
+        closing_accounts_staking_ref_script_index,
       } -> {
         // {{{
-        // Accounts older than 2 years are up for grabs (it'll be 1 year for
-        // the contributor). This is meant as a measure to prevent permanent
-        // locking of funds and unavailability of an unused username for free
-        // accounts..
-        // 1. Three UTxOs are expected to be spent such that one of them points
-        //    to the closing account's username, and the other three are closing
-        //    account's entry, "info," and reference script UTxOs
-        // 2. All three closing account's tokens must be getting burnt
+        // Users will have the right to close their accounts. The only
+        // requirement is to pay all the deployment funds back to their
+        // designated treasury.
+        // 1. Five UTxOs are expected to be spent such that one of them points
+        //    to the closing account's username, and the other four are closing
+        //    account's entry, "info," and two reference script UTxOs
+        // 2. All four closing account's tokens must be getting burnt
         // 3. Datum of the previous account must be updated so that it points to
         //    the (potential) account that the closing account points to (note
         //    that unlike `MintNewAccount` endpoint, here we won't allow value
@@ -329,10 +329,12 @@ validator record(utxo_ref: OutputReference) {
           m_closing_entrys_output,
           m_closing_accounts_output,
           m_ref_scripts_output,
+          m_staking_ref_scripts_output,
           _last_index,
         <-
-          utils.foldl5(
+          utils.foldl6(
             inputs,
+            None,
             None,
             None,
             None,
@@ -344,6 +346,7 @@ validator record(utxo_ref: OutputReference) {
               m_closing_entry,
               m_closing_account,
               m_ref_script,
+              m_staking_ref_script,
               curr_index,
               return,
             ) {
@@ -364,6 +367,7 @@ validator record(utxo_ref: OutputReference) {
                       m_closing_entry,
                       m_closing_account,
                       m_ref_script,
+                      m_staking_ref_script,
                       next_index,
                     )
                   } else if curr_index == closing_entrys_index {
@@ -372,6 +376,7 @@ validator record(utxo_ref: OutputReference) {
                       Some(o),
                       m_closing_account,
                       m_ref_script,
+                      m_staking_ref_script,
                       next_index,
                     )
                   } else if curr_index == closing_accounts_index {
@@ -380,6 +385,7 @@ validator record(utxo_ref: OutputReference) {
                       m_closing_entry,
                       Some(o),
                       m_ref_script,
+                      m_staking_ref_script,
                       next_index,
                     )
                   } else if curr_index == closing_accounts_ref_script_index {
@@ -387,6 +393,16 @@ validator record(utxo_ref: OutputReference) {
                       m_prev_entry,
                       m_closing_entry,
                       m_closing_account,
+                      Some(o),
+                      m_staking_ref_script,
+                      next_index,
+                    )
+                  } else if curr_index == closing_accounts_staking_ref_script_index {
+                    return(
+                      m_prev_entry,
+                      m_closing_entry,
+                      m_closing_account,
+                      m_ref_script,
                       Some(o),
                       next_index,
                     )
@@ -400,84 +416,99 @@ validator record(utxo_ref: OutputReference) {
                     m_closing_entry,
                     m_closing_account,
                     m_ref_script,
+                    m_staking_ref_script,
                     next_index,
                   )
               }
             },
           )
-        // Only 4 UTxOs must be spent from the record script:
+        // Only 5 UTxOs must be spent from the record script:
         // 1. Previous entry
         // 2. Closing entry
         // 3. Closing account
         // 4. Closing account's reference script
-        expect Some(prev_entrys_output) = m_prev_entrys_output
-        expect Some(closing_entrys_output) = m_closing_entrys_output
-        expect Some(closing_accounts_output) = m_closing_accounts_output
-        expect Some(ref_scripts_output) = m_ref_scripts_output
-        expect (
-          Output {
-            address: prev_entrys_address,
-            value: prev_entrys_value,
-            datum: InlineDatum(prev_entrys_datum),
-            ..
-          },
-          Output {
-            value: closing_entrys_value,
-            datum: InlineDatum(closing_entrys_datum),
-            ..
-          },
-          Output {
-            value: closing_accounts_value,
-            datum: InlineDatum(closing_accounts_datum),
-            ..
-          },
-          Output {
-            value: ref_scripts_value,
-            datum: InlineDatum(ref_scripts_datum),
-            reference_script: Some(_),
-            ..
-          },
-        ) =
-          (
-            prev_entrys_output,
-            closing_entrys_output,
-            closing_accounts_output,
-            ref_scripts_output,
-          )
+        // 5. Closing account's staking reference script
+        expect Some(Output {
+          address: prev_entrys_address,
+          value: prev_entrys_value,
+          datum: InlineDatum(prev_entrys_datum),
+          ..
+        }) = m_prev_entrys_output
+        expect Some(Output {
+          value: closing_entrys_value,
+          datum: InlineDatum(closing_entrys_datum),
+          ..
+        }) = m_closing_entrys_output
+        expect Some(Output {
+          value: closing_accounts_value,
+          datum: InlineDatum(closing_accounts_datum),
+          ..
+        }) = m_closing_accounts_output
+        expect Some(Output {
+          value: ref_scripts_value,
+          datum: NoDatum,
+          reference_script: Some(_),
+          ..
+        }) = m_ref_scripts_output
+        expect Some(Output {
+          value: staking_ref_scripts_value,
+          datum: NoDatum,
+          reference_script: Some(_),
+          ..
+        }) = m_staking_ref_scripts_output
 
         let (prev_entrys_policy, _prev_entrys_token_name, prev_entrys_qty) =
           utils.get_single_asset_from_value_apart_from_ada(prev_entrys_value)
-        let (closing_entrys_policy, closing_username, closing_entrys_qty) =
-          utils.get_single_asset_from_value_apart_from_ada(closing_entrys_value)
-        let (
+        let
+          closing_entrys_lovelace,
+          closing_entrys_policy,
+          closing_username,
+          closing_entrys_qty,
+        <- utils.get_lovelace_quantity_and_single_asset(closing_entrys_value)
+        let
+          closing_accounts_lovelace,
           closing_accounts_policy,
           closing_accounts_token_name,
           closing_accounts_qty,
-        ) =
-          utils.get_single_asset_from_value_apart_from_ada(
-            closing_accounts_value,
+        <- utils.get_lovelace_quantity_and_single_asset(closing_accounts_value)
+        let
+          ref_scripts_lovelace,
+          ref_scripts_policy,
+          ref_scripts_token_name,
+          ref_scripts_qty,
+        <- utils.get_lovelace_quantity_and_single_asset(ref_scripts_value)
+        let
+          staking_ref_scripts_lovelace,
+          staking_ref_scripts_policy,
+          staking_ref_scripts_token_name,
+          staking_ref_scripts_qty,
+        <-
+          utils.get_lovelace_quantity_and_single_asset(
+            staking_ref_scripts_value,
           )
-        let (ref_scripts_policy, ref_scripts_token_name, ref_scripts_qty) =
-          utils.get_single_asset_from_value_apart_from_ada(ref_scripts_value)
 
         // Spent tokens must be authentic.
         expect and {
-            prev_entrys_policy == own_policy,
-            closing_entrys_policy == own_policy,
-            closing_accounts_policy == own_policy,
-            ref_scripts_policy == own_policy,
+            own_policy == prev_entrys_policy,
+            own_policy == closing_entrys_policy,
+            own_policy == closing_accounts_policy,
+            own_policy == ref_scripts_policy,
+            own_policy == staking_ref_scripts_policy,
             closing_username == closing_accounts_token_name,
             closing_username == ref_scripts_token_name,
+            closing_username == staking_ref_scripts_token_name,
             prev_entrys_qty == 1,
             closing_entrys_qty == 1,
             closing_accounts_qty == 1,
             ref_scripts_qty == 1,
+            staking_ref_scripts_qty == 1,
           }?
 
         // Usernames and token names must match properly.
         expect Entry {
           next_username: Some(stored_closing_username),
           contributor: prev_entrys_contributor,
+          treasury_address: prev_entrys_treasury_address,
         }: RecordDatum = prev_entrys_datum
         expect (stored_closing_username == closing_username)?
         expect Entry {
@@ -486,11 +517,13 @@ validator record(utxo_ref: OutputReference) {
             verification_key_hash: closing_entrys_contributor,
             ..
           },
+          treasury_address: closing_entrys_treasury_address,
         }: RecordDatum = closing_entrys_datum
         let prev_entrys_updated_datum: Data =
           Entry {
             next_username: closing_entrys_next_username,
             contributor: prev_entrys_contributor,
+            treasury_address: prev_entrys_treasury_address,
           }
 
         // Exactly one asset must be burnt for `closing_username`, with a
@@ -502,9 +535,8 @@ validator record(utxo_ref: OutputReference) {
             burn_qty == -4,
           }?
 
-        expect DeployedScript: RecordDatum = ref_scripts_datum
-
-        // First produced UTxO must go back to the script.
+        // - First produced UTxO must go back to the script.
+        // - Second one should go to closing account's designated treasury.
         expect [
           Output {
             address: cont_prev_address,
@@ -512,10 +544,16 @@ validator record(utxo_ref: OutputReference) {
             value: cont_prev_value,
             reference_script: None,
           },
+          Output {
+            address: treasurys_address,
+            datum: InlineDatum(treasurys_datum_data),
+            value: treasurys_value,
+            reference_script: None,
+          },
           ..
         ] = outputs
 
-        expect Account { m_latest_activity, .. }: RecordDatum =
+        expect Account { pubkey: closing_accounts_pubkey, .. }: RecordDatum =
           closing_accounts_datum
 
         // Previous entry in the list is reproduced unchanged, except for its
@@ -524,18 +562,17 @@ validator record(utxo_ref: OutputReference) {
         and {
           cont_prev_address == prev_entrys_address,
           cont_prev_datum == prev_entrys_updated_datum,
-          // If it's a free account, it must be considered stale.
           cont_prev_value == prev_entrys_value,
-          when m_latest_activity is {
-            None -> True
-            Some(latest_activity) ->
-              utils.account_is_stale(
-                latest_activity,
-                closing_entrys_contributor,
-                extra_signatories,
-                validity_range,
-              )
-          },
+          utils.outputs_signed_by_ed25519_key(
+            closing_accounts_pubkey,
+            outputs,
+            signature,
+          ),
+          treasurys_value == assets.from_lovelace(
+            assets.lovelace_of(
+              closing_entrys_lovelace + closing_accounts_lovelace + ref_scripts_lovelace + staking_ref_scripts_lovelace,
+            ),
+          ),
         }?
       }
     }

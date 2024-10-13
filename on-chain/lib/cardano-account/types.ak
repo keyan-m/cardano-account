@@ -7,19 +7,24 @@ pub type Contributor {
 }
 
 pub type RecordDatum {
-  Entry { next_username: Option<ByteArray>, contributor: Contributor }
+  Entry {
+    next_username: Option<ByteArray>,
+    contributor: Contributor,
+    treasury_address: Address,
+  }
   Account { pubkey: ByteArray, salt: ByteArray }
-  DeployedScript
 }
 
 pub type RecordMintAction {
   InitiateRecord
   MintNewAccount { username: ByteArray, signature: Signature }
   BurnAccount {
+    signature: Signature,
     prev_entrys_index: Int,
     closing_entrys_index: Int,
     closing_accounts_index: Int,
     closing_accounts_ref_script_index: Int,
+    closing_accounts_staking_ref_script_index: Int,
   }
 }
 

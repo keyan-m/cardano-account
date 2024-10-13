@@ -11,14 +11,21 @@ use cardano_account/constants
 pub type PubKeyHash =
   VerificationKeyHash
 
-type Fold5<a, b, c, d, e, result> =
+// Credit for these fold functions goes to KtorZ
+type Scott4<a, b, c, d, result> =
+  fn(a, b, c, d) -> result
+
+type Scott5<a, b, c, d, e, result> =
   fn(a, b, c, d, e) -> result
+
+type Scott6<a, b, c, d, e, f, result> =
+  fn(a, b, c, d, e, f) -> result
 
 fn do_fold5(
   self: List<x>,
-  with: fn(x, a, b, c, d, e, Fold5<a, b, c, d, e, result>) -> result,
-  return: Fold5<a, b, c, d, e, result>,
-) -> Fold5<a, b, c, d, e, result> {
+  with: fn(x, a, b, c, d, e, Scott5<a, b, c, d, e, result>) -> result,
+  return: Scott5<a, b, c, d, e, result>,
+) -> Scott5<a, b, c, d, e, result> {
   when self is {
     [] -> return
     [x, ..xs] ->
@@ -26,7 +33,22 @@ fn do_fold5(
   }
 }
 
-// Credit for this function goes to KtorZ
+fn do_fold6(
+  self: List<x>,
+  with: fn(x, a, b, c, d, e, f, Scott6<a, b, c, d, e, f, result>) -> result,
+  return: Scott6<a, b, c, d, e, f, result>,
+) -> Scott6<a, b, c, d, e, f, result> {
+  when self is {
+    [] -> return
+    [x, ..xs] ->
+      do_fold6(
+        xs,
+        with,
+        fn(a, b, c, d, e, f) { with(x, a, b, c, d, e, f, return) },
+      )
+  }
+}
+
 pub fn foldl5(
   self: List<x>,
   zero_a: a,
@@ -34,10 +56,24 @@ pub fn foldl5(
   zero_c: c,
   zero_d: d,
   zero_e: e,
-  with: fn(x, a, b, c, d, e, Fold5<a, b, c, d, e, result>) -> result,
-  return: Fold5<a, b, c, d, e, result>,
+  with: fn(x, a, b, c, d, e, Scott5<a, b, c, d, e, result>) -> result,
+  return: Scott5<a, b, c, d, e, result>,
 ) -> result {
   do_fold5(self, with, return)(zero_a, zero_b, zero_c, zero_d, zero_e)
+}
+
+pub fn foldl5(
+  self: List<x>,
+  zero_a: a,
+  zero_b: b,
+  zero_c: c,
+  zero_d: d,
+  zero_e: e,
+  zero_f: f,
+  with: fn(x, a, b, c, d, e, f, Scott6<a, b, c, d, e, f, result>) -> result,
+  return: Scott6<a, b, c, d, e, f, result>,
+) -> result {
+  do_fold6(self, with, return)(zero_a, zero_b, zero_c, zero_d, zero_e, zero_f)
 }
 
 // This functions assumes the "first" asset is ADA.
@@ -50,6 +86,15 @@ pub fn get_single_asset_from_value_apart_from_ada(
     v
       |> assets.flatten
   triplet
+}
+
+pub fn get_lovelace_quantity_and_single_asset(
+  v: Value,
+  return: Scott4<Int, PolicyId, AssetName, Int, result>,
+) -> result {
+  expect [(_, _, lovelace_qty),
+    (policy_id, token_name, qty)] = v |> assets.flatten
+  return(lovelace_qty, policy_id, token_name, qty)
 }
 
 pub fn get_single_mint_quantity_of(

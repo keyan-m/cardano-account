@@ -52,7 +52,7 @@ validator account_spend(
   ) {
     let Transaction { outputs, reference_inputs, withdrawals, .. } = tx
     when action is {
-      VerifyAuthority { accounts_reference_input_index, signature } -> {
+      VerifyAuthority { accounts_reference_input_index, signature } ->
         verify_signature_from_reference_inputs(
           outputs,
           reference_inputs,
@@ -61,7 +61,6 @@ validator account_spend(
           accounts_reference_input_index,
           signature,
         )
-      }
       VerifyExtraObserved ->
         when pairs.get_first(withdrawals, extra_observer_script) is {
           Some(_) -> True
@@ -79,25 +78,20 @@ validator account_staking(record_script_hash: ScriptHash, username: ByteArray) {
   // This validates account's authentication UTxO is spent (and subsequently the
   // tx is signed by the stored ED25519 key).
   withdraw(action: AccountStakeAction, _own_cred: Credential, tx: Transaction) {
-    let Transaction {
-      inputs,
-      outputs,
-      redeemers,
-      reference_inputs,
-      ..
-    } = tx
+    let Transaction { inputs, outputs, redeemers, reference_inputs, .. } = tx
     when action is {
       // For withdrawing while changing pubkey.
       VerifySpentAccount { accounts_input_index } -> {
         let Input {
           output_reference: accounts_out_ref,
           output: accounts_resolved_input,
-        } = utils.get_authentic_input_of_at(
-          inputs,
-          record_script_hash,
-          username,
-          accounts_input_index,
-        )
+        } =
+          utils.get_authentic_input_of_at(
+            inputs,
+            record_script_hash,
+            username,
+            accounts_input_index,
+          )
 
         expect Some(account_spend_redeemer_data) =
           pairs.get_first(redeemers, Spend(accounts_out_ref))
@@ -114,7 +108,7 @@ validator account_staking(record_script_hash: ScriptHash, username: ByteArray) {
           _ -> False
         }
       }
-      VerifySignature { accounts_reference_input_index, signature } -> {
+      VerifySignature { accounts_reference_input_index, signature } ->
         verify_signature_from_reference_inputs(
           outputs,
           reference_inputs,
@@ -123,7 +117,6 @@ validator account_staking(record_script_hash: ScriptHash, username: ByteArray) {
           accounts_reference_input_index,
           signature,
         )
-      }
     }
   }
 
@@ -132,9 +125,8 @@ validator account_staking(record_script_hash: ScriptHash, username: ByteArray) {
       // Anyone can register
       RegisterCredential { .. } -> True
       // Unregistration can only happen when closing an account
-      UnregisterCredential { .. } -> {
+      UnregisterCredential { .. } ->
         validate_mint(tx.mint, record_script_hash, username, -4)?
-      }
       _ -> False
     }
   }
