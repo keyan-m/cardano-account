@@ -24,4 +24,4 @@ requirements = []
 source = "github"
 
 [etags]
-"aiken-lang/fuzz@v2" = [{ secs_since_epoch = 1728845481, nanos_since_epoch = 35101176 }, "64a32283418d58cade34059d3855b857e84505541158c541c460cafa0d355475"]
+"aiken-lang/fuzz@v2" = [{ secs_since_epoch = 1728852386, nanos_since_epoch = 380483095 }, "64a32283418d58cade34059d3855b857e84505541158c541c460cafa0d355475"]

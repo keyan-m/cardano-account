@@ -8,21 +8,16 @@ use cardano/transaction.{
   InlineDatum, Input, NoDatum, Output, OutputReference, Transaction,
 }
 use cardano_account/types.{
-  Account, AppendToNewAccount, AuthorizedSpend, BurnAccount, Contributor,
-  CloseAccount, Entry, InitiateRecord, MintNewAccount,
-  RecordDatum, RecordMintAction, RecordSpendAction, UpdatePubkey,
+  Account, AppendToNewAccount, AuthorizedSpend, BurnAccount, CloseAccount,
+  Contributor, Entry, InitiateRecord, MintNewAccount, RecordDatum,
+  RecordMintAction, RecordSpendAction, UpdatePubkey,
 } as types
 use cardano_account/utils as utils
 
 // === THE VALIDATOR ===========================================================
 validator record(utxo_ref: OutputReference) {
   mint(action: RecordMintAction, own_policy: PolicyId, tx: Transaction) {
-    let Transaction {
-      inputs,
-      outputs,
-      mint,
-      ..
-    } = tx
+    let Transaction { inputs, outputs, mint, .. } = tx
 
     let own_script = Script(own_policy)
 
@@ -564,7 +559,7 @@ validator record(utxo_ref: OutputReference) {
           ),
           treasurys_address == closing_entrys_treasury_address,
           treasurys_value == assets.from_lovelace(
-              closing_entrys_lovelace + closing_accounts_lovelace + ref_scripts_lovelace + staking_ref_scripts_lovelace,
+            closing_entrys_lovelace + closing_accounts_lovelace + ref_scripts_lovelace + staking_ref_scripts_lovelace,
           ),
           treasurys_contributor == closing_entrys_contributor,
         }?
@@ -593,8 +588,7 @@ validator record(utxo_ref: OutputReference) {
       AuthorizedSpend { signature, accounts_input_index, intent } -> {
         expect Some(input_datum) = datum
 
-        expect Account { pubkey, .. }: RecordDatum =
-          input_datum
+        expect Account { pubkey, .. }: RecordDatum = input_datum
 
         expect Output {
           address: Address { payment_credential: Script(own_script_hash), .. } as own_address,
@@ -616,10 +610,8 @@ validator record(utxo_ref: OutputReference) {
           ..
         ] = outputs
 
-        expect Account {
-          pubkey: cont_pubkey,
-          salt: cont_salt,
-        }: RecordDatum = cont_datum_data
+        expect Account { pubkey: cont_pubkey, salt: cont_salt }: RecordDatum =
+          cont_datum_data
 
         // 1. Input account UTxO must be authentic
         // 2. Outputs must be signed by input account's stored `pubkey`
