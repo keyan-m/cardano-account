@@ -8,8 +8,8 @@ use cardano/transaction.{
   InlineDatum, Input, NoDatum, Output, OutputReference, Transaction,
 }
 use cardano_account/types.{
-  Account, AppendToNewAccount, AuthorizedSpend, CloseStaleAccount, Contributor,
-  DepleteAccount, Entry, InitiateRecord, MintNewAccount, ProveActivity,
+  Account, AppendToNewAccount, AuthorizedSpend, BurnAccount, Contributor,
+  CloseAccount, Entry, InitiateRecord, MintNewAccount,
   RecordDatum, RecordMintAction, RecordSpendAction, UpdatePubkey,
 } as types
 use cardano_account/utils as utils
@@ -18,11 +18,9 @@ use cardano_account/utils as utils
 validator record(utxo_ref: OutputReference) {
   mint(action: RecordMintAction, own_policy: PolicyId, tx: Transaction) {
     let Transaction {
-      extra_signatories,
       inputs,
       outputs,
       mint,
-      validity_range,
       ..
     } = tx
 
@@ -39,7 +37,7 @@ validator record(utxo_ref: OutputReference) {
         // 4. List head's output datum is
         //      `Entry { next_username: None, contributor }`
         //    where the contributor can be set arbitrarily
-        // 5. Reference UTxO has a `DeployedScript` datum
+        // 5. Reference UTxO has no datum attached
         // 6. Each of the two produced UTxOs carry one of the nameless tokens
 
         // To enforce a single initiation, the specified UTxO must be spent.
@@ -67,7 +65,7 @@ validator record(utxo_ref: OutputReference) {
               ..
             },
             value: records_ref_script_value,
-            datum: InlineDatum(records_ref_script_datum_data),
+            datum: NoDatum,
             reference_script: Some(_),
           },
           ..
@@ -76,9 +74,6 @@ validator record(utxo_ref: OutputReference) {
         // Linked list must be empty at initiation. Other fields can be
         // arbitrarily set.
         expect Entry { next_username: None, .. } = list_head_datum_data
-
-        // Proper datum must be attached to the reference script's UTxO.
-        expect DeployedScript = records_ref_script_datum_data
 
         // List head UTxO must contain only one other asset apart from ADA.
         let (list_head_asset_symbol, list_head_asset_name, list_head_asset_qty) =
@@ -245,7 +240,7 @@ validator record(utxo_ref: OutputReference) {
           entrys_output_asset_quantity,
         ) = utils.get_single_asset_from_value_apart_from_ada(o1_value)
 
-        expect Account { pubkey: specified_pubkey, salt: specified_salt, .. }: RecordDatum =
+        expect Account { pubkey: specified_pubkey, salt: specified_salt }: RecordDatum =
           o2_datum_data
         let (
           accounts_output_asset_policy,
@@ -513,10 +508,7 @@ validator record(utxo_ref: OutputReference) {
         expect (stored_closing_username == closing_username)?
         expect Entry {
           next_username: closing_entrys_next_username,
-          contributor: Contributor {
-            verification_key_hash: closing_entrys_contributor,
-            ..
-          },
+          contributor: closing_entrys_contributor,
           treasury_address: closing_entrys_treasury_address,
         }: RecordDatum = closing_entrys_datum
         let prev_entrys_updated_datum: Data =
@@ -556,6 +548,8 @@ validator record(utxo_ref: OutputReference) {
         expect Account { pubkey: closing_accounts_pubkey, .. }: RecordDatum =
           closing_accounts_datum
 
+        expect treasurys_contributor: Contributor = treasurys_datum_data
+
         // Previous entry in the list is reproduced unchanged, except for its
         // datum, which must point to the closing entry's (potential) next
         // username.
@@ -568,11 +562,11 @@ validator record(utxo_ref: OutputReference) {
             outputs,
             signature,
           ),
+          treasurys_address == closing_entrys_treasury_address,
           treasurys_value == assets.from_lovelace(
-            assets.lovelace_of(
               closing_entrys_lovelace + closing_accounts_lovelace + ref_scripts_lovelace + staking_ref_scripts_lovelace,
-            ),
           ),
+          treasurys_contributor == closing_entrys_contributor,
         }?
       }
     }
@@ -585,21 +579,21 @@ validator record(utxo_ref: OutputReference) {
     own_out_ref: OutputReference,
     tx: Transaction,
   ) {
-    let Transaction { inputs, outputs, mint, validity_range, .. } = tx
+    let Transaction { inputs, outputs, mint, .. } = tx
 
     when action is {
       AppendToNewAccount { input_index } ->
         // This only needs to make sure the minting endpoint is invoked with a
         // single asset of own script hash.
         validate_mint(input_index, 4, own_out_ref, inputs, mint)?
-      DepleteAccount { input_index } ->
+      CloseAccount { input_index } ->
         // This only needs to make sure the minting endpoint is invoked with a
         // single asset of own script hash.
         validate_mint(input_index, -4, own_out_ref, inputs, mint)?
       AuthorizedSpend { signature, accounts_input_index, intent } -> {
         expect Some(input_datum) = datum
 
-        expect Account { pubkey, salt, m_latest_activity }: RecordDatum =
+        expect Account { pubkey, .. }: RecordDatum =
           input_datum
 
         expect Output {
@@ -625,7 +619,6 @@ validator record(utxo_ref: OutputReference) {
         expect Account {
           pubkey: cont_pubkey,
           salt: cont_salt,
-          m_latest_activity: cont_m_latest_activity,
         }: RecordDatum = cont_datum_data
 
         // 1. Input account UTxO must be authentic
@@ -633,28 +626,15 @@ validator record(utxo_ref: OutputReference) {
         // 3. Account UTxO must go back to the script
         // 4. Account's value must remain unchanged (this is fine as the
         //    datum size won't change)
-        // 5. `m_latest_activity` must be properly reproduced
-        // 6. If the intent is to just prove activity, `pubkey` and `salt` must
-        //    remain unchanged, otherwise they both need to be updated, and the
-        //    outputs must also be signed by the new `pubkey`
+        // 6. If the intent is to update pubkey, both pubkey and salt need to be
+        //    updated, and the outputs must also be signed by the new `pubkey`
         and {
           accounts_policy == own_script_hash,
           accounts_qty == 1,
           utils.outputs_signed_by_ed25519_key(pubkey, outputs, signature),
           cont_address == own_address,
           cont_value == own_value,
-          when m_latest_activity is {
-            None -> True
-            Some(_) ->
-              cont_m_latest_activity == Some(
-                utils.get_upper_bound(validity_range),
-              )
-          },
           when intent is {
-            ProveActivity -> and {
-                cont_pubkey == pubkey,
-                cont_salt == salt,
-              }
             UpdatePubkey { signature_with_new_key } -> and {
                 !(cont_pubkey == pubkey),
                 cont_salt == cbor.serialise(own_out_ref),

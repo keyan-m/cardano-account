@@ -1,5 +1,5 @@
 use aiken/crypto.{Signature}
-use cardano/address.{Credential}
+use cardano/address.{Address, Credential}
 
 pub type Contributor {
   verification_key_hash: ByteArray,
@@ -30,7 +30,7 @@ pub type RecordMintAction {
 
 pub type RecordSpendAction {
   AppendToNewAccount { input_index: Int }
-  CloseAccount
+  CloseAccount { input_index: Int }
   AuthorizedSpend {
     signature: Signature,
     accounts_input_index: Int,

@@ -6,7 +6,6 @@ use aiken/interval.{Finite, Interval, IntervalBound}
 use cardano/address.{Address, Credential, Script}
 use cardano/assets.{AssetName, PolicyId, Value}
 use cardano/transaction.{Input, Output, OutputReference, ValidityRange}
-use cardano_account/constants
 
 pub type PubKeyHash =
   VerificationKeyHash
@@ -62,7 +61,7 @@ pub fn foldl5(
   do_fold5(self, with, return)(zero_a, zero_b, zero_c, zero_d, zero_e)
 }
 
-pub fn foldl5(
+pub fn foldl6(
   self: List<x>,
   zero_a: a,
   zero_b: b,
@@ -202,31 +201,4 @@ pub fn outputs_signed_by_ed25519_key(
     cbor.serialise(outputs),
     signature,
   )
-}
-
-pub fn account_is_stale(
-  latest_activity: Int,
-  accounts_contributor_vkh: VerificationKeyHash,
-  extra_signatories: List<VerificationKeyHash>,
-  validity_range: ValidityRange,
-) -> Bool {
-  // An account must be considered stale to allow its removal. There is a 2-tier
-  // staleness.
-  //
-  // The contributor who had provided the initial funds for creating the account
-  // has the right to claim all the funds earlier than public (contributor is
-  // enforced to be a verification key hash, validating a script payment
-  // credential would add too much complexity).
-  //
-  // Therefore if contributor's signature is present, the shorter allowed
-  // inactivity is used to validate staleness.
-  let allowed_inactivity_period =
-    if list.has(extra_signatories, accounts_contributor_vkh) {
-      constants.allowed_inactivity_period_before_contributor_can_claim
-    } else {
-      constants.allowed_inactivity_period_before_open_claim
-    }
-  let elapsed_since_inactivity =
-    get_upper_bound(validity_range) - latest_activity
-  elapsed_since_inactivity > allowed_inactivity_period
 }
