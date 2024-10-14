@@ -14,12 +14,9 @@ use cardano/address.{Credential}
 use cardano/assets
 use cardano/certificate.{Certificate, RegisterCredential, UnregisterCredential}
 use cardano/transaction.{
-  Datum, InlineDatum, Input, Output, OutputReference, Redeemer,
-  Transaction,
+  Datum, InlineDatum, Input, Output, OutputReference, Redeemer, Transaction,
 }
-use cardano_account/types.{
-  Account, RecordDatum,
-}
+use cardano_account/types.{Account, RecordDatum}
 use cardano_account/utils as utils
 
 // === DATATYPES ===============================================================
@@ -34,9 +31,7 @@ pub type VerifySignature {
 }
 
 // === VALIDATORS ==============================================================
-validator account_spend(
-  observer_script: Credential,
-) {
+validator account_spend(observer_script: Credential) {
   // Minimal validation that only checks to see if `observer_script` is invoked.
   // This allows cheap spends of multiple UTxOs.
   spend(
