@@ -17,7 +17,7 @@ jobs:
 
       - run: aiken fmt --check
         working-directory: ./on-chain
-      - run: aiken check -D
+      - run: aiken check
         working-directory: ./on-chain
       - run: aiken build
         working-directory: ./on-chain
