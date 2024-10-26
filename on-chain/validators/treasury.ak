@@ -11,7 +11,8 @@ use cardano/address.{Address, Inline, Script}
 use cardano/transaction.{
   InlineDatum, Input, Output, OutputReference, Transaction,
 }
-use cardano_account/types.{Contributor, Entry, RecordDatum}
+use cardano_account/types.{Account,
+  ContributionReturn, Contributor, RecordDatum}
 use cardano_account/utils as utils
 
 // === THE VALIDATOR ===========================================================
@@ -56,7 +57,6 @@ validator treasury(record_script_hash: ScriptHash) {
           stake_credential: Some(Inline(new_entrys_stake_credential)),
           ..
         },
-        datum: InlineDatum(new_entrys_datum_data),
         ..
       },
       Output {
@@ -64,6 +64,7 @@ validator treasury(record_script_hash: ScriptHash) {
           stake_credential: Some(Inline(users_account_stake_credential)),
           ..
         },
+        datum: InlineDatum(users_account_datum_data),
         ..
       },
       Output {
@@ -82,11 +83,13 @@ validator treasury(record_script_hash: ScriptHash) {
       },
       ..
     ] = outputs
-    expect Entry {
-      contributor: new_entrys_contributor,
-      treasury_address: new_entrys_treasury_address,
+    expect Account {
+      contribution_return: Some(ContributionReturn {
+        contributor: users_account_contributor,
+        treasury_address: users_account_treasury_address,
+      }),
       ..
-    }: RecordDatum = new_entrys_datum_data
+    }: RecordDatum = users_account_datum_data
     and {
       // Staking parts of the 4 newly produced UTxOs must match that of
       // contributor's
@@ -95,9 +98,9 @@ validator treasury(record_script_hash: ScriptHash) {
       spending_ref_script_stake_credential == contributors_stake_credential,
       staking_ref_script_stake_credential == contributors_stake_credential,
       // Contributor must be stored in record entry's datum
-      new_entrys_contributor == contributor,
+      users_account_contributor == contributor,
       // This treausry's address must also be correctly stored.
-      new_entrys_treasury_address == treasury_address,
+      users_account_treasury_address == treasury_address,
     }?
   }
 

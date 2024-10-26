@@ -9,8 +9,8 @@ use cardano/transaction.{
 }
 use cardano_account/types.{
   Account, AppendToNewAccount, AuthorizedSpend, BurnAccount, CloseAccount,
-  Contributor, Entry, InitiateRecord, MintNewAccount, RecordDatum,
-  RecordMintAction, RecordSpendAction, UpdatePubkey,
+  ContributionReturn, Contributor, Entry, InitiateRecord, MintNewAccount,
+  RecordDatum, RecordMintAction, RecordSpendAction, UpdatePubkey,
 } as types
 use cardano_account/utils as utils
 
@@ -66,9 +66,8 @@ validator record(utxo_ref: OutputReference) {
           ..
         ] = outputs
 
-        // Linked list must be empty at initiation. Other fields can be
-        // arbitrarily set.
-        expect Entry { next_username: None, .. } = list_head_datum_data
+        // Linked list must be empty at initiation.
+        expect Entry { next_username: None } = list_head_datum_data
 
         // List head UTxO must contain only one other asset apart from ADA.
         let (list_head_asset_symbol, list_head_asset_name, list_head_asset_qty) =
@@ -143,17 +142,8 @@ validator record(utxo_ref: OutputReference) {
             bytearray.compare(prev_entrys_beacon_name, username) == Less,
           }?
 
-        expect Entry {
-          next_username: prev_entrys_next_username,
-          contributor: prev_entrys_contributor,
-          treasury_address: prev_entrys_treasury_address,
-        }: RecordDatum = prev_entry_data
-        let updated_datum =
-          Entry {
-            next_username: Some(username),
-            contributor: prev_entrys_contributor,
-            treasury_address: prev_entrys_treasury_address,
-          }
+        expect Entry { next_username: prev_entrys_next_username }: RecordDatum =
+          prev_entry_data
 
         // New username must be smaller than a potential next user. Note that
         // only usernames are compared.
@@ -179,7 +169,7 @@ validator record(utxo_ref: OutputReference) {
           Output {
             address: o0_address,
             value: o0_value,
-            datum: o0_datum,
+            datum: InlineDatum(o0_datum_data),
             reference_script: None,
           },
           Output {
@@ -221,13 +211,16 @@ validator record(utxo_ref: OutputReference) {
           ..
         ] = outputs
 
+        expect Entry{next_username: Some(prev_entrys_updated_next_username)}: RecordDatum =
+          o0_datum_data
+
         // We don't care about Lovelace fluctuations, since in case previous
         // entry's datum goes from a `None` to a `Some`, its minimum required
         // Lovelaces increases.
         let updated_prev_entrys_beacon =
           utils.get_single_asset_from_value_apart_from_ada(o0_value)
 
-        expect Entry { next_username: entrys_next_username, .. }: RecordDatum =
+        expect Entry { next_username: entrys_next_username }: RecordDatum =
           o1_datum_data
         let (
           entrys_output_asset_policy,
@@ -235,7 +228,9 @@ validator record(utxo_ref: OutputReference) {
           entrys_output_asset_quantity,
         ) = utils.get_single_asset_from_value_apart_from_ada(o1_value)
 
-        expect Account { pubkey: specified_pubkey, salt: specified_salt }: RecordDatum =
+        // `contributor` and `treasury_address` can be set arbitrarily. If
+        // funded by treasury, its own contract will validate these.
+        expect Account { pubkey: specified_pubkey, salt: specified_salt, .. }: RecordDatum =
           o2_datum_data
         let (
           accounts_output_asset_policy,
@@ -281,7 +276,7 @@ validator record(utxo_ref: OutputReference) {
           accounts_staking_script_asset_name == username,
           accounts_staking_script_asset_quantity == 1,
           // --- Datum validations ---------------------------------------------
-          o0_datum == InlineDatum(updated_datum),
+          prev_entrys_updated_next_username == username,
           entrys_next_username == prev_entrys_next_username,
           specified_salt == cbor.serialise(own_out_ref),
           utils.outputs_signed_by_ed25519_key(
@@ -313,6 +308,10 @@ validator record(utxo_ref: OutputReference) {
         //    that unlike `MintNewAccount` endpoint, here we won't allow value
         //    of previous entry's UTxO to change, since its datum can only
         //    decrease in size)
+        // 4. If there is contribution return info attached to the closing
+        //    account's UTxO (i.e. its deployment costs were covered by the
+        //    treasury), all Lovelaces next to authentication tokens must go
+        //    back to the designated treasury
 
         let
           m_prev_entrys_output,
@@ -495,23 +494,13 @@ validator record(utxo_ref: OutputReference) {
           }?
 
         // Usernames and token names must match properly.
-        expect Entry {
-          next_username: Some(stored_closing_username),
-          contributor: prev_entrys_contributor,
-          treasury_address: prev_entrys_treasury_address,
-        }: RecordDatum = prev_entrys_datum
+        expect Entry{next_username: Some(stored_closing_username)}: RecordDatum =
+          prev_entrys_datum
         expect (stored_closing_username == closing_username)?
-        expect Entry {
-          next_username: closing_entrys_next_username,
-          contributor: closing_entrys_contributor,
-          treasury_address: closing_entrys_treasury_address,
-        }: RecordDatum = closing_entrys_datum
+        expect Entry { next_username: closing_entrys_next_username }: RecordDatum =
+          closing_entrys_datum
         let prev_entrys_updated_datum: Data =
-          Entry {
-            next_username: closing_entrys_next_username,
-            contributor: prev_entrys_contributor,
-            treasury_address: prev_entrys_treasury_address,
-          }
+          Entry { next_username: closing_entrys_next_username }
 
         // Exactly one asset must be burnt for `closing_username`, with a
         // quantity of -4. Here too there is no need to validate the burnt
@@ -523,7 +512,10 @@ validator record(utxo_ref: OutputReference) {
           }?
 
         // - First produced UTxO must go back to the script.
-        // - Second one should go to closing account's designated treasury.
+        // - We're also expecting a second produced UTxO here so that further
+        //   down we can validate it against a possible reimbursement of its
+        //   contributor (this is alright as spent UTxOs validated here can't
+        //   cover transaction fees)
         expect [
           Output {
             address: cont_prev_address,
@@ -531,19 +523,15 @@ validator record(utxo_ref: OutputReference) {
             value: cont_prev_value,
             reference_script: None,
           },
-          Output {
-            address: treasurys_address,
-            datum: InlineDatum(treasurys_datum_data),
-            value: treasurys_value,
-            reference_script: None,
-          },
+          o2,
           ..
         ] = outputs
 
-        expect Account { pubkey: closing_accounts_pubkey, .. }: RecordDatum =
-          closing_accounts_datum
-
-        expect treasurys_contributor: Contributor = treasurys_datum_data
+        expect Account {
+          pubkey: closing_accounts_pubkey,
+          contribution_return: closing_accounts_contribution_return,
+          ..
+        }: RecordDatum = closing_accounts_datum
 
         // Previous entry in the list is reproduced unchanged, except for its
         // datum, which must point to the closing entry's (potential) next
@@ -557,11 +545,34 @@ validator record(utxo_ref: OutputReference) {
             outputs,
             signature,
           ),
-          treasurys_address == closing_entrys_treasury_address,
-          treasurys_value == assets.from_lovelace(
-            closing_entrys_lovelace + closing_accounts_lovelace + ref_scripts_lovelace + staking_ref_scripts_lovelace,
-          ),
-          treasurys_contributor == closing_entrys_contributor,
+          // If there are contribution info stored in the closing account, it
+          // means this account has not paid back the deployment costs yet, and
+          // it can only close the account by paying the funds back to the
+          // treasury, ensuring the contributor's info are preserved.
+          when closing_accounts_contribution_return is {
+            None -> True
+            Some(ContributionReturn {
+              treasury_address: closing_accounts_treasury_address,
+              contributor: closing_accounts_contributor,
+            }) -> {
+              expect Output {
+                address: treasurys_address,
+                datum: InlineDatum(treasurys_datum_data),
+                value: treasurys_value,
+                reference_script: None,
+              } = o2
+
+              expect treasurys_contributor: Contributor = treasurys_datum_data
+
+              and {
+                treasurys_address == closing_accounts_treasury_address,
+                treasurys_value == assets.from_lovelace(
+                  closing_entrys_lovelace + closing_accounts_lovelace + ref_scripts_lovelace + staking_ref_scripts_lovelace,
+                ),
+                treasurys_contributor == closing_accounts_contributor,
+              }
+            }
+          },
         }?
       }
     }
@@ -588,7 +599,7 @@ validator record(utxo_ref: OutputReference) {
       AuthorizedSpend { signature, accounts_input_index, intent } -> {
         expect Some(input_datum) = datum
 
-        expect Account { pubkey, .. }: RecordDatum = input_datum
+        expect Account { pubkey, contribution_return, .. }: RecordDatum = input_datum
 
         expect Output {
           address: Address { payment_credential: Script(own_script_hash), .. } as own_address,
@@ -610,7 +621,7 @@ validator record(utxo_ref: OutputReference) {
           ..
         ] = outputs
 
-        expect Account { pubkey: cont_pubkey, salt: cont_salt }: RecordDatum =
+        expect Account { pubkey: cont_pubkey, salt: cont_salt, contribution_return: cont_contribution_return }: RecordDatum =
           cont_datum_data
 
         // 1. Input account UTxO must be authentic
@@ -626,6 +637,7 @@ validator record(utxo_ref: OutputReference) {
           utils.outputs_signed_by_ed25519_key(pubkey, outputs, signature),
           cont_address == own_address,
           cont_value == own_value,
+          cont_contribution_return == contribution_return,
           when intent is {
             UpdatePubkey { signature_with_new_key } -> and {
                 !(cont_pubkey == pubkey),

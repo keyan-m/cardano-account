@@ -73,10 +73,13 @@ the `username` parameter of the contract.
 Information stored in account UTxO's datum consist of:
 - User's ED25519 public key
 - The salt that was presumably used to generate the key pair
+- If the account registration was funded by a contributor, reimbursement info
+  are also included
 ```rs
 type Account {
   pubkey: ByteArray,
   salt: ByteArray,
+  constribution_return: Option<ContributionReturn>,
 }
 ```
 

@@ -6,6 +6,7 @@ use aiken/interval.{Finite, Interval, IntervalBound}
 use cardano/address.{Address, Credential, Script}
 use cardano/assets.{AssetName, PolicyId, Value}
 use cardano/transaction.{Input, Output, OutputReference, ValidityRange}
+use cardano/transaction/output_reference as output_reference
 
 pub type PubKeyHash =
   VerificationKeyHash
@@ -20,7 +21,49 @@ type Scott5<a, b, c, d, e, result> =
 type Scott6<a, b, c, d, e, f, result> =
   fn(a, b, c, d, e, f) -> result
 
-fn do_fold5(
+fn do_foldr4(
+  self: List<x>,
+  with: fn(x, a, b, c, d, Scott4<a, b, c, d, result>) -> result,
+  return: Scott4<a, b, c, d, result>,
+) -> Scott4<a, b, c, d, result> {
+  when self is {
+    [] -> return
+    [x, ..xs] ->
+      do_foldr4(xs, with, fn(a, b, c, d) { with(x, a, b, c, d, return) })
+  }
+}
+
+pub fn foldl4(
+  self: List<x>,
+  zero_a: a,
+  zero_b: b,
+  zero_c: c,
+  zero_d: d,
+  with: fn(x, a, b, c, d, Scott4<a, b, c, d, result>) -> result,
+  return: Scott4<a, b, c, d, result>,
+) -> result {
+  when self is {
+    [] -> return(zero_a, zero_b, zero_c, zero_d)
+    [x, ..xs] -> {
+      let acc_a, acc_b, acc_c, acc_d <- with(x, zero_a, zero_b, zero_c, zero_d)
+      foldl4(xs, acc_a, acc_b, acc_c, acc_d, with, return)
+    }
+  }
+}
+
+pub fn foldr4(
+  self: List<x>,
+  zero_a: a,
+  zero_b: b,
+  zero_c: c,
+  zero_d: d,
+  with: fn(x, a, b, c, d, Scott4<a, b, c, d, result>) -> result,
+  return: Scott4<a, b, c, d, result>,
+) -> result {
+  do_foldr4(self, with, return)(zero_a, zero_b, zero_c, zero_d)
+}
+
+fn do_foldr5(
   self: List<x>,
   with: fn(x, a, b, c, d, e, Scott5<a, b, c, d, e, result>) -> result,
   return: Scott5<a, b, c, d, e, result>,
@@ -28,23 +71,7 @@ fn do_fold5(
   when self is {
     [] -> return
     [x, ..xs] ->
-      do_fold5(xs, with, fn(a, b, c, d, e) { with(x, a, b, c, d, e, return) })
-  }
-}
-
-fn do_fold6(
-  self: List<x>,
-  with: fn(x, a, b, c, d, e, f, Scott6<a, b, c, d, e, f, result>) -> result,
-  return: Scott6<a, b, c, d, e, f, result>,
-) -> Scott6<a, b, c, d, e, f, result> {
-  when self is {
-    [] -> return
-    [x, ..xs] ->
-      do_fold6(
-        xs,
-        with,
-        fn(a, b, c, d, e, f) { with(x, a, b, c, d, e, f, return) },
-      )
+      do_foldr5(xs, with, fn(a, b, c, d, e) { with(x, a, b, c, d, e, return) })
   }
 }
 
@@ -58,7 +85,48 @@ pub fn foldl5(
   with: fn(x, a, b, c, d, e, Scott5<a, b, c, d, e, result>) -> result,
   return: Scott5<a, b, c, d, e, result>,
 ) -> result {
-  do_fold5(self, with, return)(zero_a, zero_b, zero_c, zero_d, zero_e)
+  when self is {
+    [] -> return(zero_a, zero_b, zero_c, zero_d, zero_e)
+    [x, ..xs] -> {
+      let
+        acc_a,
+        acc_b,
+        acc_c,
+        acc_d,
+        acc_e,
+      <- with(x, zero_a, zero_b, zero_c, zero_d, zero_e)
+      foldl5(xs, acc_a, acc_b, acc_c, acc_d, acc_e, with, return)
+    }
+  }
+}
+
+pub fn foldr5(
+  self: List<x>,
+  zero_a: a,
+  zero_b: b,
+  zero_c: c,
+  zero_d: d,
+  zero_e: e,
+  with: fn(x, a, b, c, d, e, Scott5<a, b, c, d, e, result>) -> result,
+  return: Scott5<a, b, c, d, e, result>,
+) -> result {
+  do_foldr5(self, with, return)(zero_a, zero_b, zero_c, zero_d, zero_e)
+}
+
+fn do_foldr6(
+  self: List<x>,
+  with: fn(x, a, b, c, d, e, f, Scott6<a, b, c, d, e, f, result>) -> result,
+  return: Scott6<a, b, c, d, e, f, result>,
+) -> Scott6<a, b, c, d, e, f, result> {
+  when self is {
+    [] -> return
+    [x, ..xs] ->
+      do_foldr6(
+        xs,
+        with,
+        fn(a, b, c, d, e, f) { with(x, a, b, c, d, e, f, return) },
+      )
+  }
 }
 
 pub fn foldl6(
@@ -72,7 +140,29 @@ pub fn foldl6(
   with: fn(x, a, b, c, d, e, f, Scott6<a, b, c, d, e, f, result>) -> result,
   return: Scott6<a, b, c, d, e, f, result>,
 ) -> result {
-  do_fold6(self, with, return)(zero_a, zero_b, zero_c, zero_d, zero_e, zero_f)
+  when self is {
+    [] -> return(zero_a, zero_b, zero_c, zero_d, zero_e, zero_f)
+    [x, ..xs] -> {
+      let
+        acc_a,
+        acc_b,
+        acc_c,
+        acc_d,
+        acc_e,
+        acc_f,
+      <- with(x, zero_a, zero_b, zero_c, zero_d, zero_e, zero_f)
+      foldl6(xs, acc_a, acc_b, acc_c, acc_d, acc_e, acc_f, with, return)
+    }
+  }
+}
+
+pub fn sort_inputs(inputs: List<Input>) -> List<Input> {
+  inputs
+    |> list.sort(
+        fn(i0: Input, i1: Input) {
+          output_reference.compare(i0.output_reference, i1.output_reference)
+        },
+      )
 }
 
 // This functions assumes the "first" asset is ADA.

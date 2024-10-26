@@ -1,13 +1,17 @@
 use aiken/builtin
 use aiken/cbor
 use aiken/collection/list
+use aiken/crypto.{ScriptHash}
 use aiken/fuzz.{and_then}
 use aiken/primitive/bytearray
 use cardano/address.{Address, Inline, Script, VerificationKey}
 use cardano/assets.{Value}
 use cardano/transaction.{
-  Datum, InlineDatum, Input, NoDatum, Output, OutputReference,
+  Datum, Input, NoDatum, Output, OutputReference,
 }
+use cardano/transaction/output_reference as output_reference
+use cardano_account/utils as utils
+
 
 const sample_outputs =
   #"9fd8799fd8799fd87a9f581c9ee6dfb61a2fb903df487c401663825643bb825d41695e63df8af616ffd87a80ffa240a1401a00030d40581c9ee6dfb61a2fb903df487c401663825643bb825d41695e63df8af616a1419e01d87b9f01ffd87a80ffd8799fd8799fd87a9f581c9ee6dfb61a2fb903df487c401663825643bb825d41695e63df8af616ffd87a80ffa140a1401a00030d40d87b9f01ffd87a80ffd8799fd8799fd87a9f581c9ee6dfb61a2fb903df487c401663825643bb825d41695e63df8af616ffd87a80ffa240a1401a00030d40581c9ee6dfb61a2fb903df487c401663825643bb825d41695e63df8af616a1419e02d87b9f01ffd87a80ffd8799fd8799fd87a9f581c9ee6dfb61a2fb903df487c401663825643bb825d41695e63df8af616ffd87a80ffa140a1401a00030d40d87b9f01ffd87a80ffd8799fd8799fd87a9f581c9ee6dfb61a2fb903df487c401663825643bb825d41695e63df8af616ffd87a80ffa240a1401a00030d40581c9ee6dfb61a2fb903df487c401663825643bb825d41695e63df8af616a1419e07d87b9f01ffd87a80ffd8799fd8799fd87a9f581c9ee6dfb61a2fb903df487c401663825643bb825d41695e63df8af616ffd87a80ffa240a1401a00030d40581c9ee6dfb61a2fb903df487c401663825643bb825d41695e63df8af616a1419e01d87b9f01ffd87a80ffd8799fd8799fd87a9f581c9ee6dfb61a2fb903df487c401663825643bb825d41695e63df8af616ffd87a80ffa140a1401a00030d40d87b9f01ffd87a80ffd8799fd8799fd87a9f581c9ee6dfb61a2fb903df487c401663825643bb825d41695e63df8af616ffd87a80ffa240a1401a00030d40581c9ee6dfb61a2fb903df487c401663825643bb825d41695e63df8af616a1419e02d87b9f01ffd87a80ffd8799fd8799fd87a9f581c9ee6dfb61a2fb903df487c401663825643bb825d41695e63df8af616ffd87a80ffa140a1401a00030d40d87b9f01ffd87a80ffd8799fd8799fd87a9f581c9ee6dfb61a2fb903df487c401663825643bb825d41695e63df8af616ffd87a80ffa240a1401a00030d40581c9ee6dfb61a2fb903df487c401663825643bb825d41695e63df8af616a1419e03d87b9f01ffd87a80ffff"
@@ -29,16 +33,28 @@ const signed_sample_outputs_blake2b_256 =
 /// A fuzzer for `Value` with a single asset. Unsafely expects 28 bytes long
 /// policy ID to be provided.
 pub fn single_specific_asset_value_fuzzer(policyId: ByteArray) -> Fuzzer<Value> {
-  let token_name_length <- and_then(fuzz.int_between(0, 32))
-  let token_name <- and_then(fuzz.bytearray_fixed(token_name_length))
+  let token_name <- and_then(fuzz.bytearray_between(0, 32))
   let quantity <- and_then(fuzz.int_at_least(1))
   fuzz.constant(assets.from_asset(policyId, token_name, quantity))
 }
 
-/// A `Value` fuzzer a single asset. Randomly generates the policy ID.
+/// A `Value` fuzzer with a single asset. Randomly generates the policy ID.
 pub fn single_asset_value_fuzzer() -> Fuzzer<Value> {
   let policyId <- and_then(fuzz.bytearray_fixed(28))
   single_specific_asset_value_fuzzer(policyId)
+}
+
+/// A `Value` fuzzer without any lovelaces.
+pub fn mint_fuzzer() -> Fuzzer<Value> {
+  let other_assets_values <-
+    and_then(fuzz.list_between(single_asset_value_fuzzer(), 1, 10))
+  fuzz.constant(
+    list.foldl(
+      other_assets_values,
+      assets.zero,
+      fn(v, acc) { assets.merge(v, acc) },
+    ),
+  )
 }
 
 /// A `Value` fuzzer, guaranteed to include some amount of ADA (minimum must be
@@ -47,7 +63,7 @@ pub fn value_fuzzer(min_lovelaces: Int) -> Fuzzer<Value> {
   let lovelace_count <- and_then(fuzz.int_at_least(min_lovelaces))
   let lovelace_value = assets.from_lovelace(lovelace_count)
   let other_assets_values <-
-    and_then(fuzz.list_at_most(single_asset_value_fuzzer(), 256))
+    and_then(fuzz.list_at_most(single_asset_value_fuzzer(), 10))
   fuzz.constant(
     list.foldl(
       other_assets_values,
@@ -91,37 +107,39 @@ pub fn user_input_fuzzer() -> Fuzzer<Input> {
   fuzz.constant(Input { output_reference, output })
 }
 
-/// Returns a tuple where its first element is the random script hash (payment
-/// part of the UTxO's address). UTxO value is also random, with 2 ADA.
-pub fn script_output_fuzzer(
-  m_datum: Option<Datum>,
-) -> Fuzzer<(ByteArray, Output)> {
-  let script_hash <- and_then(fuzz.bytearray_fixed(28))
+/// Given a script hash and datum, this fuzzer generates a UTxO at an address
+/// which its payment part is the same as the given script hash.
+pub fn specific_script_output_fuzzer(
+  script_hash: ScriptHash,
+  datum: Datum,
+) -> Fuzzer<Output> {
   let v <- and_then(value_fuzzer(2_000_000))
   fuzz.constant(
-    (
-      script_hash,
-      Output {
-        address: Address {
-          payment_credential: Script(script_hash),
-          stake_credential: None,
-        },
-        value: v,
-        datum: when m_datum is {
-          None -> NoDatum
-          Some(datum_data) -> InlineDatum(datum_data)
-        },
-        reference_script: None,
+    Output {
+      address: Address {
+        payment_credential: Script(script_hash),
+        stake_credential: None,
       },
-    ),
+      value: v,
+      datum,
+      reference_script: None,
+    },
   )
+}
+
+/// Returns a tuple where its first element is the random script hash (payment
+/// part of the UTxO's address). UTxO value is also random, with 2 ADA.
+pub fn script_output_fuzzer(datum: Datum) -> Fuzzer<(ByteArray, Output)> {
+  let script_hash <- and_then(fuzz.bytearray_fixed(28))
+  let utxo <- and_then(specific_script_output_fuzzer(script_hash, datum))
+  fuzz.constant((script_hash, utxo))
 }
 
 /// UTxO fuzzer, where the value is composed of 2 ADA and a beacon NFT, such
 /// that its policy ID is equal to the script credential of the payment part of
 /// UTxO's address. This script hash is also returned.
 pub fn authentic_script_output_fuzzer(
-  m_datum: Option<Datum>,
+  datum: Datum,
 ) -> Fuzzer<(ByteArray, Output)> {
   let script_hash <- and_then(fuzz.bytearray_fixed(28))
   let tn <- and_then(fuzz.bytearray_between(0, 32))
@@ -137,37 +155,65 @@ pub fn authentic_script_output_fuzzer(
           stake_credential: None,
         },
         value: v,
-        datum: when m_datum is {
-          None -> NoDatum
-          Some(datum_data) -> InlineDatum(datum_data)
-        },
+        datum,
         reference_script: None,
       },
     ),
   )
 }
 
+/// Similar to [`specific_script_output_fuzzer`](#specific_script_output_fuzzer),
+/// with an additional randomized wrapper for output reference.
+pub fn specific_script_input_fuzzer(
+  script_hash: ScriptHash,
+  datum: Datum,
+) -> Fuzzer<Input> {
+  let output_reference <- and_then(output_reference_fuzzer())
+  let output <- and_then(specific_script_output_fuzzer(script_hash, datum))
+  fuzz.constant(Input { output_reference, output })
+}
+
 /// Similar to [`script_output_fuzzer`](#script_output_fuzzer), with an
 /// additional randomized wrapper for output reference.
-pub fn script_input_fuzzer(m_datum: Option<Datum>) -> Fuzzer<(ByteArray, Input)> {
+pub fn script_input_fuzzer(datum: Datum) -> Fuzzer<(ByteArray, Input)> {
   let output_reference <- and_then(output_reference_fuzzer())
-  let (script_hash, output) <- and_then(script_output_fuzzer(m_datum))
+  let (script_hash, output) <- and_then(script_output_fuzzer(datum))
   fuzz.constant((script_hash, Input { output_reference, output }))
 }
 
 /// Similar to [`authentic_script_output_fuzzer`](#script_output_fuzzer), with
 /// and additional randomized wrapper for output reference.
-pub fn authentic_script_input_fuzzer(
-  m_datum: Option<Datum>,
-) -> Fuzzer<(ByteArray, Input)> {
+pub fn authentic_script_input_fuzzer(datum: Datum) -> Fuzzer<(ByteArray, Input)> {
   let output_reference <- and_then(output_reference_fuzzer())
-  let (script_hash, output) <- and_then(authentic_script_output_fuzzer(m_datum))
+  let (script_hash, output) <- and_then(authentic_script_output_fuzzer(datum))
   fuzz.constant((script_hash, Input { output_reference, output }))
 }
 
 /// Simple (non-script) outputs fuzzer.
-fn user_outputs_fuzzer() -> Fuzzer<List<Output>> {
-  fuzz.list_at_least(user_output_fuzzer(), 1)
+pub fn user_outputs_fuzzer() -> Fuzzer<List<Output>> {
+  fuzz.list_between(user_output_fuzzer(), 1, 10)
+}
+
+/// Simple (non-script) inputs fuzzer.
+pub fn user_inputs_fuzzer() -> Fuzzer<List<Input>> {
+  fuzz.list_between(user_input_fuzzer(), 1, 10)
+}
+
+/// Fuzzer for a sorted list of user/wallet inputs, with the addition of one
+/// authentic script input.
+pub fn inputs_with_an_authentic_script_input_fuzzer(
+  datum: Datum,
+) -> Fuzzer<(ByteArray, Input, List<Input>)> {
+  let wallet_inputs <- and_then(user_inputs_fuzzer())
+  let (spend_script_hash, script_input) <-
+    and_then(authentic_script_input_fuzzer(datum))
+  fuzz.constant(
+    (
+      spend_script_hash,
+      script_input,
+      [script_input, ..wallet_inputs] |> utils.sort_inputs,
+    ),
+  )
 }
 
 test prop_outputs(outs via user_outputs_fuzzer()) {

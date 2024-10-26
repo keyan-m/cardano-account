@@ -6,13 +6,18 @@ pub type Contributor {
   stake_credential: Credential,
 }
 
+pub type ContributionReturn {
+  contributor: Contributor,
+  treasury_address: Address,
+}
+
 pub type RecordDatum {
-  Entry {
-    next_username: Option<ByteArray>,
-    contributor: Contributor,
-    treasury_address: Address,
+  Entry { next_username: Option<ByteArray> }
+  Account {
+    pubkey: ByteArray,
+    salt: ByteArray,
+    contribution_return: Option<ContributionReturn>,
   }
-  Account { pubkey: ByteArray, salt: ByteArray }
 }
 
 pub type RecordMintAction {
