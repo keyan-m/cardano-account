@@ -2,7 +2,7 @@
 ////
 //// This contract allows a single UTxO to be spent for each new account. One
 //// other requirement is that all newly created UTxOs must have staking parts
-//// that match that of the UTxO's contributor (store in datum).
+//// that match that of the UTxO's contributor (stored in datum).
 
 // === IMPORTS =================================================================
 use aiken/collection/list
@@ -34,8 +34,8 @@ validator treasury(record_script_hash: ScriptHash) {
     let mint_qty = utils.get_single_mint_quantity_of(mint, record_script_hash)
     expect (mint_qty == 4)?
 
-    // Apart from UTxOs spent from `record` script, only one script UTxO is
-    // expected to be spent, which will be from this `treasury` contract.
+    // Apart from UTxOs spent from `record` script, only one UTxO is expected
+    // to be spent, which will be from this `treasury` contract.
     let records_script = Script(record_script_hash)
     expect [Input { output: Output { address: treasury_address, .. }, .. }] =
       list.filter(
@@ -93,14 +93,14 @@ validator treasury(record_script_hash: ScriptHash) {
     and {
       // Staking parts of the 4 newly produced UTxOs must match that of
       // contributor's
-      new_entrys_stake_credential == contributors_stake_credential,
-      users_account_stake_credential == contributors_stake_credential,
-      spending_ref_script_stake_credential == contributors_stake_credential,
-      staking_ref_script_stake_credential == contributors_stake_credential,
+      contributors_stake_credential == new_entrys_stake_credential,
+      contributors_stake_credential == users_account_stake_credential,
+      contributors_stake_credential == spending_ref_script_stake_credential,
+      contributors_stake_credential == staking_ref_script_stake_credential,
       // Contributor must be stored in record entry's datum
-      users_account_contributor == contributor,
+      contributor == users_account_contributor,
       // This treausry's address must also be correctly stored.
-      users_account_treasury_address == treasury_address,
+      treasury_address == users_account_treasury_address,
     }?
   }
 

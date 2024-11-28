@@ -30,7 +30,7 @@ validator record(utxo_ref: OutputReference) {
         // 3. Two UTxOs are produced at the script: list head at index 0, record
         //    validator's deployed script at index 1
         // 4. List head's output datum is
-        //      `Entry { next_username: None, contributor }`
+        //      `Entry { next_username: None }`
         //    where the contributor can be set arbitrarily
         // 5. Reference UTxO has no datum attached
         // 6. Each of the two produced UTxOs carry one of the nameless tokens
@@ -599,7 +599,8 @@ validator record(utxo_ref: OutputReference) {
       AuthorizedSpend { signature, accounts_input_index, intent } -> {
         expect Some(input_datum) = datum
 
-        expect Account { pubkey, contribution_return, .. }: RecordDatum = input_datum
+        expect Account { pubkey, contribution_return, .. }: RecordDatum =
+          input_datum
 
         expect Output {
           address: Address { payment_credential: Script(own_script_hash), .. } as own_address,
@@ -621,8 +622,11 @@ validator record(utxo_ref: OutputReference) {
           ..
         ] = outputs
 
-        expect Account { pubkey: cont_pubkey, salt: cont_salt, contribution_return: cont_contribution_return }: RecordDatum =
-          cont_datum_data
+        expect Account {
+          pubkey: cont_pubkey,
+          salt: cont_salt,
+          contribution_return: cont_contribution_return,
+        }: RecordDatum = cont_datum_data
 
         // 1. Input account UTxO must be authentic
         // 2. Outputs must be signed by input account's stored `pubkey`
