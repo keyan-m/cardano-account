@@ -2,6 +2,7 @@
 use aiken/cbor
 use aiken/collection/list
 use aiken/primitive/bytearray
+use aiken_scott_utils/list.{foldl6} as scott_list
 use cardano/address.{Address, Script}
 use cardano/assets.{PolicyId, Value}
 use cardano/transaction.{
@@ -321,7 +322,7 @@ validator record(utxo_ref: OutputReference) {
           m_staking_ref_scripts_output,
           _last_index,
         <-
-          utils.foldl6(
+          foldl6(
             inputs,
             None,
             None,
@@ -627,6 +628,7 @@ validator record(utxo_ref: OutputReference) {
           salt: cont_salt,
           contribution_return: cont_contribution_return,
         }: RecordDatum = cont_datum_data
+        let UpdatePubkey { signature_with_new_key } = intent
 
         // 1. Input account UTxO must be authentic
         // 2. Outputs must be signed by input account's stored `pubkey`
@@ -642,17 +644,14 @@ validator record(utxo_ref: OutputReference) {
           cont_address == own_address,
           cont_value == own_value,
           cont_contribution_return == contribution_return,
-          when intent is {
-            UpdatePubkey { signature_with_new_key } -> and {
-                !(cont_pubkey == pubkey),
-                cont_salt == cbor.serialise(own_out_ref),
-                utils.outputs_signed_by_ed25519_key(
-                  cont_pubkey,
-                  outputs,
-                  signature_with_new_key,
-                ),
-              }
-          },
+          // Validations for updating the pubkey
+          !(cont_pubkey == pubkey),
+          cont_salt == cbor.serialise(own_out_ref),
+          utils.outputs_signed_by_ed25519_key(
+            cont_pubkey,
+            outputs,
+            signature_with_new_key,
+          ),
         }?
       }
     }

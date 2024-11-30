@@ -11,6 +11,11 @@ name = "aiken-lang/fuzz"
 version = "2.1.0"
 source = "github"
 
+[[requirements]]
+name = "keyan-m/aiken-scott-utils"
+version = "main"
+source = "github"
+
 [[packages]]
 name = "aiken-lang/stdlib"
 version = "2.1.0"
@@ -23,4 +28,11 @@ version = "2.1.0"
 requirements = []
 source = "github"
 
+[[packages]]
+name = "keyan-m/aiken-scott-utils"
+version = "main"
+requirements = []
+source = "github"
+
 [etags]
+"keyan-m/aiken-scott-utils@main" = [{ secs_since_epoch = 1732964673, nanos_since_epoch = 509295455 }, "5ae8e1f888a1840b656bddc167d2d505124fad3f8ee6dcf5a76a71958ffb8e51"]
